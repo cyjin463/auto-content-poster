@@ -210,6 +210,21 @@ Please respond in the following JSON format:
             # 한글 검증 (한글 모드일 때만)
             if language == 'korean':
                 is_valid, error_msg = validate_korean_content(title, content_text)
+                if not is_valid and ("한자" in error_msg or "베트남어" in error_msg or "외국어" in error_msg):
+                    # 한자/외국어가 포함된 경우 자동 제거 시도
+                    from utils import remove_hanja_from_text
+                    print(f"  🔧 [{self.name}] 한자/외국어 자동 제거 중...")
+                    title_cleaned = remove_hanja_from_text(title)
+                    content_cleaned = remove_hanja_from_text(content_text)
+                    
+                    # 제거 후 재검증
+                    is_valid_cleaned, _ = validate_korean_content(title_cleaned, content_cleaned)
+                    if is_valid_cleaned:
+                        print(f"  🔧 [{self.name}] 한자/외국어 자동 제거 성공")
+                        title = title_cleaned
+                        content_text = content_cleaned
+                        is_valid = True
+                
                 if not is_valid:
                     print(f"  ⚠️  [{self.name}] 한글 검증 실패: {error_msg}")
                     print(f"  🔄 [{self.name}] 한글로 재생성 시도... (최대 3회)")
@@ -270,8 +285,19 @@ Please respond in the following JSON format:
                                     print(f"  ⚠️  [{self.name}] 재생성 실패: {retry_error_msg}, 다시 시도...")
                                     error_msg = retry_error_msg
                                 else:
+                                    # 최종 재시도 실패 시 한자 제거 후처리 적용
+                                    from utils import remove_hanja_from_text
                                     print(f"  ⚠️  [{self.name}] 재생성 최종 실패 (3회 시도): {retry_error_msg}")
-                                    print(f"  ⚠️  원본 콘텐츠 사용 (한자/외국어가 포함될 수 있음)")
+                                    print(f"  🔧 [{self.name}] 한자 제거 후처리 적용 중...")
+                                    title = remove_hanja_from_text(title)
+                                    content_text = remove_hanja_from_text(content_text)
+                                    
+                                    # 후처리 후 재검증
+                                    is_valid_cleaned, _ = validate_korean_content(title, content_text)
+                                    if is_valid_cleaned:
+                                        print(f"  ✅ [{self.name}] 한자 제거 후처리 성공")
+                                    else:
+                                        print(f"  ⚠️  한자 제거 후처리 후에도 검증 실패, 원본 콘텐츠 사용")
                         except Exception as e:
                             if retry_count < max_retries - 1:
                                 print(f"  ⚠️  [{self.name}] 재생성 오류: {e}, 다시 시도...")
