@@ -1,27 +1,68 @@
 """
-검색 기능 (DuckDuckGo 무료 검색)
+검색 기능 (Google Custom Search API 우선, DuckDuckGo 백업)
 """
 
 import requests
 import re
+import os
 from typing import List, Dict
+from urllib.parse import quote_plus
+
+# 환경 변수에서 API 키 로드
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+GOOGLE_CSE_ID = os.getenv("GOOGLE_CSE_ID")
+USE_GOOGLE_SEARCH = bool(GOOGLE_API_KEY and GOOGLE_CSE_ID)
 
 
-def search_keywords(query: str, num_results: int = 10) -> List[Dict[str, str]]:
-    """DuckDuckGo 검색"""
+def search_keywords_google(query: str, num_results: int = 10) -> List[Dict[str, str]]:
+    """Google Custom Search API 사용 (하루 100건 무료)"""
+    results = []
+    
+    if not USE_GOOGLE_SEARCH:
+        return []
+    
+    try:
+        # Google Custom Search API 호출
+        url = "https://www.googleapis.com/customsearch/v1"
+        params = {
+            "key": GOOGLE_API_KEY,
+            "cx": GOOGLE_CSE_ID,
+            "q": query,
+            "num": min(num_results, 10),  # Google API는 한 번에 최대 10개
+        }
+        
+        response = requests.get(url, params=params, timeout=15)
+        
+        if response.ok:
+            data = response.json()
+            
+            # 검색 결과 파싱
+            if "items" in data:
+                for item in data["items"][:num_results]:
+                    results.append({
+                        "title": item.get("title", ""),
+                        "link": item.get("link", ""),
+                        "snippet": item.get("snippet", "")
+                    })
+        
+        return results[:num_results]
+        
+    except Exception as e:
+        print(f"  ⚠️  Google 검색 오류: {e}")
+        return []
+
+
+def search_keywords_duckduckgo(query: str, num_results: int = 10) -> List[Dict[str, str]]:
+    """DuckDuckGo 검색 (백업용)"""
     results = []
     
     try:
-        # DuckDuckGo HTML 검색 (더 안정적)
+        # DuckDuckGo HTML 검색
         headers = {
             "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
             "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
         }
-        
-        # URL 인코딩
-        from urllib.parse import quote_plus
-        encoded_query = quote_plus(query)
         
         response = requests.get(
             "https://html.duckduckgo.com/html/",
@@ -35,7 +76,6 @@ def search_keywords(query: str, num_results: int = 10) -> List[Dict[str, str]]:
             html = response.text
             
             # HTML에서 검색 결과 추출 (여러 패턴 시도)
-            # DuckDuckGo HTML 구조에 맞춰 파싱
             patterns = [
                 # 패턴 1: result__a 클래스
                 (r'<a\s+class="result__a"[^>]*href="([^"]+)"[^>]*>([^<]+)</a>', r'<a\s+class="result__snippet"[^>]*>([^<]+)</a>'),
@@ -126,7 +166,6 @@ def search_keywords(query: str, num_results: int = 10) -> List[Dict[str, str]]:
         # 결과가 없으면 간단한 웹 검색 시도
         if not results:
             try:
-                # 간단한 웹 검색 (더 기본적인 방식)
                 simple_response = requests.get(
                     f"https://duckduckgo.com/?q={quote_plus(query)}",
                     headers={
@@ -138,7 +177,6 @@ def search_keywords(query: str, num_results: int = 10) -> List[Dict[str, str]]:
                 
                 if simple_response.ok:
                     html = simple_response.text
-                    # 더 간단한 패턴으로 시도
                     link_pattern = r'href="(https?://[^"]+)"[^>]*>([^<]{20,100})</a>'
                     matches = re.finditer(link_pattern, html)
                     
@@ -149,7 +187,6 @@ def search_keywords(query: str, num_results: int = 10) -> List[Dict[str, str]]:
                         link = match.group(1)
                         title = match.group(2).strip()
                         
-                        # 중복 제거 및 필터링
                         if (link not in seen_links and 
                             link.startswith('http') and 
                             'duckduckgo.com' not in link and
@@ -166,6 +203,31 @@ def search_keywords(query: str, num_results: int = 10) -> List[Dict[str, str]]:
         return results[:num_results]
         
     except Exception as e:
-        print(f"검색 오류: {e}")
+        print(f"  ⚠️  DuckDuckGo 검색 오류: {e}")
         return []
 
+
+def search_keywords(query: str, num_results: int = 10) -> List[Dict[str, str]]:
+    """
+    검색 함수 (Google 우선, 실패 시 DuckDuckGo)
+    
+    Google Custom Search API를 우선 사용하며, 
+    API 키가 없거나 실패 시 DuckDuckGo로 폴백합니다.
+    
+    환경 변수:
+    - GOOGLE_API_KEY: Google Custom Search API 키
+    - GOOGLE_CSE_ID: Custom Search Engine ID
+    """
+    results = []
+    
+    # Google Search API 사용 가능한 경우
+    if USE_GOOGLE_SEARCH:
+        results = search_keywords_google(query, num_results)
+        if results:
+            return results
+        # Google 검색 실패 시 DuckDuckGo로 폴백
+    
+    # DuckDuckGo 검색 (기본값 또는 Google 실패 시)
+    results = search_keywords_duckduckgo(query, num_results)
+    
+    return results

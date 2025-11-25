@@ -37,20 +37,23 @@ class BaseAgent(ABC):
     
     @classmethod
     def _initialize_api_keys(cls):
-        """API 키 목록 초기화 (GROQ_API_KEY, GROQ_API_KEY_1만 지원)"""
+        """API 키 목록 초기화 (GROQ_API_KEY, GROQ_API_KEY_1, GROQ_API_KEY_2 지원)"""
         if cls._keys_initialized:
             return
         
-        # GROQ_API_KEY와 GROQ_API_KEY_1만 사용
+        # GROQ_API_KEY, GROQ_API_KEY_1, GROQ_API_KEY_2 순서대로 사용
         keys = []
         primary_key = os.getenv("GROQ_API_KEY")
         if primary_key:
             keys.append(primary_key)
         
-        # GROQ_API_KEY_1만 추가
         key1 = os.getenv("GROQ_API_KEY_1")
         if key1:
             keys.append(key1)
+        
+        key2 = os.getenv("GROQ_API_KEY_2")
+        if key2:
+            keys.append(key2)
         
         cls._api_keys = keys
         cls._keys_initialized = True
@@ -59,6 +62,8 @@ class BaseAgent(ABC):
             key_info = "GROQ_API_KEY"
             if len(keys) > 1:
                 key_info += " + GROQ_API_KEY_1"
+            if len(keys) > 2:
+                key_info += " + GROQ_API_KEY_2"
             print(f"  🔑 Groq API 키 {len(keys)}개 로드됨 ({key_info})")
     
     @classmethod
@@ -99,9 +104,9 @@ class BaseAgent(ABC):
         if not self._api_keys:
             raise ValueError("GROQ_API_KEY가 설정되지 않았습니다.")
         
-        # max_retries가 None이면 키 개수만큼 시도 (최대 2개: GROQ_API_KEY, GROQ_API_KEY_1)
+        # max_retries가 None이면 키 개수만큼 시도 (최대 3개: GROQ_API_KEY, GROQ_API_KEY_1, GROQ_API_KEY_2)
         if max_retries is None:
-            max_retries = min(len(self._api_keys), 2)  # 최대 2개 키만 시도
+            max_retries = min(len(self._api_keys), 3)  # 최대 3개 키까지 시도
         
         last_error = None
         tried_keys = set()
@@ -111,16 +116,15 @@ class BaseAgent(ABC):
         
         # 최대 재시도 횟수만큼 다른 키로 시도
         for attempt in range(max_retries):
-            # 사용 가능한 키 찾기 (순서대로: GROQ_API_KEY 먼저, 그 다음 GROQ_API_KEY_1)
+            # 사용 가능한 키 찾기 (순서대로: GROQ_API_KEY → GROQ_API_KEY_1 → GROQ_API_KEY_2)
             api_key = None
             
-            # 첫 번째 키부터 시도
-            if len(self._api_keys) > 0 and self._api_keys[0] not in tried_keys:
-                api_key = self._api_keys[0]
-                tried_keys.add(api_key)
-            elif len(self._api_keys) > 1 and self._api_keys[1] not in tried_keys:
-                api_key = self._api_keys[1]
-                tried_keys.add(api_key)
+            # 순서대로 키 시도
+            for idx in range(min(len(self._api_keys), 3)):
+                if self._api_keys[idx] not in tried_keys:
+                    api_key = self._api_keys[idx]
+                    tried_keys.add(api_key)
+                    break
             
             if not api_key:
                 # 모든 키를 시도했지만 실패
@@ -164,12 +168,14 @@ class BaseAgent(ABC):
                     if len(self._api_keys) > attempt + 1:
                         has_next_key = True
                     
-                    if has_next_key:
-                        current_key_name = "GROQ_API_KEY" if attempt == 0 else f"GROQ_API_KEY_1"
-                        next_key_name = "GROQ_API_KEY_1" if attempt == 0 else None
-                        print(f"  ⚠️  {current_key_name} Rate Limit 감지")
-                        if next_key_name:
-                            print(f"  🔄 {next_key_name}로 전환 시도 중... (시도 {attempt + 1}/{max_retries})")
+                    # 키 이름 출력
+                    key_names = ["GROQ_API_KEY", "GROQ_API_KEY_1", "GROQ_API_KEY_2"]
+                    current_key_name = key_names[attempt] if attempt < len(key_names) else f"API_KEY_{attempt + 1}"
+                    next_key_name = key_names[attempt + 1] if attempt + 1 < len(key_names) else None
+                    
+                    print(f"  ⚠️  {current_key_name} Rate Limit 감지")
+                    if has_next_key and next_key_name:
+                        print(f"  🔄 {next_key_name}로 전환 시도 중... (시도 {attempt + 1}/{max_retries})")
                     else:
                         print(f"  ⚠️  모든 API 키 Rate Limit 감지 (시도 {attempt + 1}/{max_retries})")
                         print(f"  ⏭️  다음날 재시도 예정")
@@ -188,12 +194,14 @@ class BaseAgent(ABC):
                     if len(self._api_keys) > attempt + 1:
                         has_next_key = True
                     
-                    if has_next_key:
-                        current_key_name = "GROQ_API_KEY" if attempt == 0 else f"GROQ_API_KEY_1"
-                        next_key_name = "GROQ_API_KEY_1" if attempt == 0 else None
-                        print(f"  ⚠️  {current_key_name} Rate Limit 감지")
-                        if next_key_name:
-                            print(f"  🔄 {next_key_name}로 전환 시도 중... (시도 {attempt + 1}/{max_retries})")
+                    # 키 이름 출력
+                    key_names = ["GROQ_API_KEY", "GROQ_API_KEY_1", "GROQ_API_KEY_2"]
+                    current_key_name = key_names[attempt] if attempt < len(key_names) else f"API_KEY_{attempt + 1}"
+                    next_key_name = key_names[attempt + 1] if attempt + 1 < len(key_names) else None
+                    
+                    print(f"  ⚠️  {current_key_name} Rate Limit 감지")
+                    if has_next_key and next_key_name:
+                        print(f"  🔄 {next_key_name}로 전환 시도 중... (시도 {attempt + 1}/{max_retries})")
                     else:
                         print(f"  ⚠️  모든 API 키 Rate Limit 감지 (시도 {attempt + 1}/{max_retries})")
                         print(f"  ⏭️  다음날 재시도 예정")

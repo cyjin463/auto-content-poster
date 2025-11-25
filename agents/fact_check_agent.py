@@ -153,12 +153,21 @@ class ContentRevisionAgent(BaseAgent):
             for i, r in enumerate(search_results[:3])
         ])
         
+        # 원본 콘텐츠에서 키워드/카테고리/출처/면책 섹션 분리 (수정 대상에서 제외)
+        import re
+        footer_pattern = r'(\n\n## (?:참고 출처|References|카테고리|Category|관련 키워드|Related Keywords).*$)'
+        footer_match = re.search(footer_pattern, original_content, re.DOTALL)
+        footer_section = footer_match.group(1) if footer_match else ""
+        main_content_to_revise = original_content[:footer_match.start()] if footer_match else original_content
+        
         prompt = f"""다음 블로그 포스트에 잘못된 정보가 포함되어 있습니다. 검색 결과를 참고하여 정확한 정보로 수정해주세요.
 
 제목: {title}
 
 원본 내용:
-{original_content[:2000]}...
+{main_content_to_revise[:3000]}...
+
+⚠️ **중요**: 키워드, 카테고리, 출처, 면책 섹션은 수정하지 마세요. 본문 내용만 수정해주세요.
 
 발견된 문제점:
 {issues_summary}
@@ -171,10 +180,11 @@ class ContentRevisionAgent(BaseAgent):
 2. 검색 결과를 참고하되, 원본 구조와 톤 유지
 3. 수정한 부분을 명확히 표시
 4. 전체 내용의 일관성 유지
+5. 키워드, 카테고리, 출처, 면책 섹션은 수정하지 말고 본문만 수정
 
 다음 JSON 형식으로 응답해주세요:
 {{
-  "revised_content": "수정된 전체 내용",
+  "revised_content": "수정된 본문 내용 (키워드/카테고리/출처/면책 섹션 제외)",
   "revisions": [
     {{
       "section": "수정된 섹션",
@@ -205,6 +215,14 @@ class ContentRevisionAgent(BaseAgent):
             revision_result = json.loads(response)
             
             revisions = revision_result.get("revisions", [])
+            revised_main_content = revision_result.get("revised_content", main_content_to_revise)
+            
+            # 수정된 본문에 키워드/카테고리/출처/면책 섹션 다시 추가
+            final_revised_content = revised_main_content
+            if footer_section:
+                final_revised_content = revised_main_content + footer_section
+                print(f"  ✅ [{self.name}] 키워드/카테고리 섹션 유지됨")
+            
             if revisions:
                 print(f"  ✅ [{self.name}] {len(revisions)}개 섹션 수정 완료")
                 for rev in revisions[:2]:  # 상위 2개만 표시
@@ -212,7 +230,7 @@ class ContentRevisionAgent(BaseAgent):
             
             return {
                 "status": "revised",
-                "revised_content": revision_result.get("revised_content", original_content),
+                "revised_content": final_revised_content,
                 "revisions": revisions
             }
             

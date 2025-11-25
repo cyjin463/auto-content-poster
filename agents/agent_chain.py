@@ -116,6 +116,13 @@ class AgentChain:
             content_to_revise = content_result["content"]
             revision_issues = []
             
+            # 키워드/카테고리/출처/면책 섹션 분리 (수정 후 다시 추가하기 위해)
+            import re
+            footer_pattern = r'(\n\n## (?:참고 출처|References|카테고리|Category|관련 키워드|Related Keywords).*$)'
+            footer_match = re.search(footer_pattern, content_to_revise, re.DOTALL)
+            footer_section = footer_match.group(1) if footer_match else ""
+            main_content = content_to_revise[:footer_match.start()] if footer_match else content_to_revise
+            
             if content_validation_result.get("issues"):
                 revision_issues.extend(content_validation_result["issues"])
             
@@ -126,7 +133,7 @@ class AgentChain:
             if revision_issues:
                 print("\n[4-1단계] 콘텐츠 수정")
                 revision_input = {
-                    "content": content_to_revise,
+                    "content": main_content,  # 본문만 수정 (키워드/카테고리 제외)
                     "title": content_result["title"],
                     "issues": revision_issues,
                     "search_results": validated_results
@@ -136,7 +143,12 @@ class AgentChain:
                 
                 if revision_result.get("status") == "revised":
                     content_to_revise = revision_result["revised_content"]
-                    print(f"  ✅ 콘텐츠 수정 완료 ({len(revision_result.get('revisions', []))}개 수정)")
+                    # 수정된 본문에 키워드/카테고리 섹션 다시 추가
+                    if footer_section:
+                        content_to_revise = content_to_revise + footer_section
+                        print(f"  ✅ 콘텐츠 수정 완료 ({len(revision_result.get('revisions', []))}개 수정, 키워드/카테고리 섹션 유지)")
+                    else:
+                        print(f"  ✅ 콘텐츠 수정 완료 ({len(revision_result.get('revisions', []))}개 수정)")
                     # 수정된 콘텐츠로 업데이트
                     content_result["content"] = content_to_revise
                     content_result["revisions"] = revision_result.get("revisions", [])
