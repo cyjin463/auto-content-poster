@@ -31,4 +31,12 @@ Thumbs.db
 
 # Logs
 *.log
+
+# Next.js build files
+.next/
+out/
+build/
+
+# Cron logs
+cron.log
 .next/

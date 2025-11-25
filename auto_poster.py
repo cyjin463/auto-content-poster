@@ -8,7 +8,7 @@
 """
 
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from database import Database
 from agents.agent_chain import AgentChain
 from agents.keyword_inference_agent import KeywordInferenceAgent
@@ -80,13 +80,26 @@ def process_single_keyword_dual_language():
     print(f"🚀 자동 포스팅 시작: '{keyword_name}'")
     print(f"{'='*60}\n")
     
-    # 오늘 이미 포스팅했는지 확인
-    today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    # 한국 시간(KST, UTC+9) 기준으로 오늘 이미 포스팅했는지 확인
+    kst = timezone(timedelta(hours=9))
+    now_kst = datetime.now(kst)
+    
+    # 오늘 오전 10시 기준 (한국 시간)
+    today_10am_kst = now_kst.replace(hour=10, minute=0, second=0, microsecond=0)
+    
     last_posted = db.get_keyword_last_posted(keyword_id)
     
-    if last_posted and last_posted >= today:
-        print(f"⏭️  오늘 이미 포스팅되었습니다. 건너뜁니다.")
-        return
+    if last_posted:
+        # last_posted가 naive datetime이면 한국 시간대로 가정하고 비교
+        if last_posted.tzinfo is None:
+            last_posted_kst = last_posted.replace(tzinfo=kst)
+        else:
+            last_posted_kst = last_posted.astimezone(kst)
+        
+        # 오늘 10시 이후에 포스팅이 있었는지 확인
+        if last_posted_kst >= today_10am_kst:
+            print(f"⏭️  오늘(한국 시간 기준) 이미 포스팅되었습니다. (마지막 포스팅: {last_posted_kst.strftime('%Y-%m-%d %H:%M:%S KST')})")
+            return
     
     chain = AgentChain()
     
