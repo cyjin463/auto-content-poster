@@ -26,7 +26,7 @@ class AgentChain:
         # 실행 로그
         self.execution_log: List[Dict[str, Any]] = []
     
-    def process(self, keyword: str, notion_page_id: Optional[str] = None, language: str = 'korean') -> Dict[str, Any]:
+    def process(self, keyword: str, notion_page_id: Optional[str] = None, language: str = 'korean', skip_posting: bool = False) -> Dict[str, Any]:
         """
         전체 프로세스 실행:
         1. 검색 에이전트 → 검색 결과
@@ -150,28 +150,37 @@ class AgentChain:
                     "generated_content": content_result  # 검증 실패했지만 콘텐츠는 있음
                 }
             
-            # 5단계: 포스팅
-            print("\n[5단계] 포스팅")
-            posting_input = {
-                "title": content_result["title"],
-                "content": content_result["content"],
-                "parent_page_id": notion_page_id
+            # 5단계: 포스팅 (skip_posting이 False일 때만)
+            posting_result = {
+                "status": "skipped",
+                "message": "포스팅 스킵됨 (auto_poster.py에서 처리)"
             }
             
-            # 환경 변수에서 parent_page_id 또는 database_id 가져오기
-            import os
-            env_parent_id = os.getenv("NOTION_PARENT_PAGE_ID")
-            database_id = os.getenv("NOTION_DATABASE_ID")
+            if not skip_posting:
+                print("\n[5단계] 포스팅")
+                posting_input = {
+                    "title": content_result["title"],
+                    "content": content_result["content"],
+                    "parent_page_id": notion_page_id
+                }
+                
+                # 환경 변수에서 parent_page_id 또는 database_id 가져오기
+                import os
+                env_parent_id = os.getenv("NOTION_PARENT_PAGE_ID")
+                database_id = os.getenv("NOTION_DATABASE_ID")
+                
+                # notion_page_id가 없으면 환경 변수에서 가져오기
+                if not posting_input["parent_page_id"] and env_parent_id:
+                    posting_input["parent_page_id"] = env_parent_id
+                
+                # database_id도 전달 (있는 경우)
+                if database_id:
+                    posting_input["database_id"] = database_id
+                
+                posting_result = self.posting_agent.process(posting_input)
+            else:
+                print("\n[5단계] 포스팅 스킵됨 (auto_poster.py에서 처리)")
             
-            # notion_page_id가 없으면 환경 변수에서 가져오기
-            if not posting_input["parent_page_id"] and env_parent_id:
-                posting_input["parent_page_id"] = env_parent_id
-            
-            # database_id도 전달 (있는 경우)
-            if database_id:
-                posting_input["database_id"] = database_id
-            
-            posting_result = self.posting_agent.process(posting_input)
             self.execution_log.append({"step": "posting", "result": posting_result})
             
             print("\n" + "=" * 60)

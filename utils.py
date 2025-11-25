@@ -41,10 +41,35 @@ def is_korean_text(text: str, threshold: float = 0.7) -> bool:
 def validate_korean_content(title: str, content: str) -> tuple[bool, str]:
     """
     제목과 본문이 한글로 작성되었는지 검증
+    - 한자 검사
+    - 외국어 검사 (베트남어, 중국어 등)
     
     Returns:
         (is_valid, error_message)
     """
+    # 한자 검사 (한자 범위: \u4e00-\u9fff)
+    hanja_pattern = re.compile(r'[\u4e00-\u9fff]+')
+    title_hanja = hanja_pattern.findall(title)
+    content_hanja = hanja_pattern.findall(content)
+    
+    if title_hanja:
+        return False, f"제목에 한자가 포함되어 있습니다: {', '.join(title_hanja[:3])}"
+    
+    if content_hanja:
+        return False, f"본문에 한자가 포함되어 있습니다: {', '.join(content_hanja[:3])}"
+    
+    # 베트남어 검사 (베트남어 특수 문자: á, à, ả, ã, ạ, etc.)
+    vietnamese_pattern = re.compile(r'[áàảãạăắằẳẵặâấầẩẫậéèẻẽẹêếềểễệíìỉĩịóòỏõọôốồổỗộơớờởỡợúùủũụưứừửữựýỳỷỹỵđ]', re.IGNORECASE)
+    title_vietnamese = vietnamese_pattern.findall(title)
+    content_vietnamese = vietnamese_pattern.findall(content)
+    
+    if title_vietnamese:
+        return False, f"제목에 베트남어 문자가 포함되어 있습니다: {', '.join(set(title_vietnamese[:5]))}"
+    
+    if content_vietnamese:
+        return False, f"본문에 베트남어 문자가 포함되어 있습니다: {', '.join(set(content_vietnamese[:5]))}"
+    
+    # 한글 비율 검사
     if not is_korean_text(title, threshold=0.5):
         return False, "제목이 한글로 작성되지 않았습니다."
     

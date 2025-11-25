@@ -81,7 +81,8 @@ def main():
                 title=result['generated_content']['title'],
                 content=result['generated_content']['content'],
                 search_results=[],
-                status=post_status
+                status=post_status,
+                language=language
             )
             
             # 포스팅 성공 시 노션 페이지 정보 업데이트

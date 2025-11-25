@@ -103,99 +103,170 @@ def process_single_keyword_dual_language():
     
     chain = AgentChain()
     
-    # 1. 한글 포스팅
-    print(f"\n📝 [1/2] 한글 포스팅 시작\n")
+    # 1. 한글 콘텐츠 생성 및 포스팅
+    print(f"\n📝 [1/2] 한글 콘텐츠 생성 중...\n")
+    content_korean = None
+    page_url_korean = None
+    post_id_korean = None
+    rate_limit_error = False
     try:
-        result_korean = chain.process(keyword_name, notion_page_id, language='korean')
+        result_korean = chain.process(keyword_name, notion_page_id, language='korean', skip_posting=True)
         
         if result_korean["status"] == "success":
             content_korean = result_korean['generated_content']
-            
-            # 출처와 면책문구 확인
             content_korean['content'] = ensure_sources_and_disclaimer(content_korean['content'])
             
-            # 중복 체크 후 저장
+            # 한글 포스팅 (skip_posting=True로 설정했으므로 여기서 포스팅)
+            print(f"  📝 한글 포스팅 중...")
+            from notion_api import create_notion_page
+            notion_result_korean = create_notion_page(
+                title=content_korean['title'],
+                content=content_korean['content'],
+                parent_page_id=notion_page_id,
+                database_id=os.getenv("NOTION_DATABASE_ID")
+            )
+            
+            page_id_korean = None
+            if notion_result_korean.get("status") == "success":
+                page_id_korean = notion_result_korean.get('page_id')
+                page_url_korean = notion_result_korean.get('page_url')
+                print(f"  ✅ 한글 포스팅 완료: {page_url_korean or ''}")
+            else:
+                print(f"  ❌ 한글 포스팅 실패")
+                return
+            
+            # 데이터베이스에 저장
             try:
                 post_id_korean = db.create_post(
                     keyword_id=keyword_id,
                     title=content_korean['title'],
                     content=content_korean['content'],
                     search_results=[],
-                    status='published' if result_korean['posting_info'].get('page_id') else 'draft',
+                    status='published',
                     language='korean'
                 )
                 
-                # 포스팅 성공 시 업데이트
-                if result_korean['posting_info'].get('page_id'):
-                    db.update_post_published(
-                        post_id_korean,
-                        result_korean['posting_info']['page_id'],
-                        result_korean['posting_info'].get('page_url', '')
-                    )
-                
-                print(f"\n✅ 한글 포스팅 완료!")
-                if result_korean['posting_info'].get('page_url'):
-                    print(f"   URL: {result_korean['posting_info']['page_url']}")
+                if page_id_korean:
+                    db.update_post_published(post_id_korean, page_id_korean, page_url_korean or '')
             except ValueError as e:
                 if "중복" in str(e):
                     print(f"  ⏭️  중복 포스트: {e}")
+                    # 중복이어도 계속 진행
                 else:
                     raise
+            
+            print(f"  ✅ 한글 콘텐츠 생성 및 저장 완료")
         else:
-            print(f"  ❌ 한글 포스팅 실패: {result_korean.get('message', '알 수 없는 오류')}")
+            error_msg = result_korean.get('message', '알 수 없는 오류')
+            print(f"  ❌ 한글 콘텐츠 생성 실패: {error_msg}")
+            # Rate Limit 에러 체크
+            if "rate_limit" in str(error_msg).lower() or "Rate limit" in str(error_msg):
+                rate_limit_error = True
+                print(f"  ⚠️  Rate Limit 감지: 키워드는 변환하되 포스팅은 건너뜁니다.")
+            else:
+                return
     except Exception as e:
-        print(f"  ❌ 한글 포스팅 오류: {e}")
-        import traceback
-        traceback.print_exc()
+        error_str = str(e)
+        print(f"  ❌ 한글 콘텐츠 생성 오류: {e}")
+        # Rate Limit 에러 체크
+        if "rate_limit" in error_str.lower() or "Rate limit" in error_str:
+            rate_limit_error = True
+            print(f"  ⚠️  Rate Limit 감지: 키워드는 변환하되 포스팅은 건너뜁니다.")
+        else:
+            import traceback
+            traceback.print_exc()
+            return
     
-    # 2. 영문 포스팅
-    print(f"\n📝 [2/2] 영문 포스팅 시작\n")
+    # 2. 영문 콘텐츠 생성 및 포스팅
+    print(f"\n📝 [2/2] 영문 콘텐츠 생성 중...\n")
+    content_english = None
+    page_url_english = None
+    post_id_english = None
     try:
-        result_english = chain.process(keyword_name, notion_page_id, language='english')
+        result_english = chain.process(keyword_name, notion_page_id, language='english', skip_posting=True)
         
         if result_english["status"] == "success":
             content_english = result_english['generated_content']
-            
-            # 출처와 면책문구 확인
             content_english['content'] = ensure_sources_and_disclaimer(content_english['content'])
             
-            # 중복 체크 후 저장
+            # 영문 포스팅 (skip_posting=True로 설정했으므로 여기서 포스팅)
+            print(f"  📝 영문 포스팅 중...")
+            from notion_api import create_notion_page
+            notion_result_english = create_notion_page(
+                title=content_english['title'],
+                content=content_english['content'],
+                parent_page_id=notion_page_id,
+                database_id=os.getenv("NOTION_DATABASE_ID")
+            )
+            
+            page_id_english = None
+            if notion_result_english.get("status") == "success":
+                page_id_english = notion_result_english.get('page_id')
+                page_url_english = notion_result_english.get('page_url')
+                print(f"  ✅ 영문 포스팅 완료: {page_url_english or ''}")
+            else:
+                print(f"  ❌ 영문 포스팅 실패")
+                return
+            
+            # 데이터베이스에 저장
             try:
                 post_id_english = db.create_post(
                     keyword_id=keyword_id,
                     title=content_english['title'],
                     content=content_english['content'],
                     search_results=[],
-                    status='published' if result_english['posting_info'].get('page_id') else 'draft',
+                    status='published',
                     language='english'
                 )
                 
-                # 포스팅 성공 시 업데이트
-                if result_english['posting_info'].get('page_id'):
-                    db.update_post_published(
-                        post_id_english,
-                        result_english['posting_info']['page_id'],
-                        result_english['posting_info'].get('page_url', '')
-                    )
-                
-                print(f"\n✅ 영문 포스팅 완료!")
-                if result_english['posting_info'].get('page_url'):
-                    print(f"   URL: {result_english['posting_info']['page_url']}")
+                if page_id_english:
+                    db.update_post_published(post_id_english, page_id_english, page_url_english or '')
             except ValueError as e:
                 if "중복" in str(e):
                     print(f"  ⏭️  중복 포스트: {e}")
+                    # 중복이어도 계속 진행
                 else:
                     raise
+            
+            print(f"  ✅ 영문 콘텐츠 생성 및 저장 완료")
         else:
-            print(f"  ❌ 영문 포스팅 실패: {result_english.get('message', '알 수 없는 오류')}")
+            error_msg = result_english.get('message', '알 수 없는 오류')
+            print(f"  ❌ 영문 콘텐츠 생성 실패: {error_msg}")
+            # Rate Limit 에러 체크
+            if "rate_limit" in str(error_msg).lower() or "Rate limit" in str(error_msg):
+                rate_limit_error = True
+                print(f"  ⚠️  Rate Limit 감지: 키워드는 변환하되 포스팅은 건너뜁니다.")
+            else:
+                return
     except Exception as e:
-        print(f"  ❌ 영문 포스팅 오류: {e}")
-        import traceback
-        traceback.print_exc()
+        error_str = str(e)
+        print(f"  ❌ 영문 콘텐츠 생성 오류: {e}")
+        # Rate Limit 에러 체크
+        if "rate_limit" in error_str.lower() or "Rate limit" in error_str:
+            rate_limit_error = True
+            print(f"  ⚠️  Rate Limit 감지: 키워드는 변환하되 포스팅은 건너뜁니다.")
+        else:
+            import traceback
+            traceback.print_exc()
+            return
     
-    # 키워드 상태 업데이트
+    # 포스팅 성공 시 last_posted 업데이트
+    if not rate_limit_error and (page_url_korean or page_url_english):
+        print(f"\n✅ 포스팅 완료!")
+        if page_url_korean:
+            print(f"   한글: {page_url_korean}")
+        if page_url_english:
+            print(f"   영문: {page_url_english}")
+    
+    elif rate_limit_error:
+        print(f"\n⏭️  Rate Limit으로 인해 포스팅을 건너뜁니다.")
+        print(f"   다음 키워드로 변환을 진행합니다.")
+    
+    # 키워드 상태 업데이트 (Rate Limit이어도 체크 시간은 업데이트)
     db.update_keyword_last_checked(keyword_id)
-    db.update_keyword_last_posted(keyword_id)
+    # 포스팅 성공한 경우에만 last_posted 업데이트
+    if not rate_limit_error and content_korean and content_english:
+        db.update_keyword_last_posted(keyword_id)
     
     # 다음 키워드 자동 추론 및 추가
     print(f"\n{'='*60}")

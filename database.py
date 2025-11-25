@@ -66,9 +66,16 @@ class Database:
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 published_at TEXT,
+                language TEXT DEFAULT 'korean',
                 FOREIGN KEY (keyword_id) REFERENCES keywords(id)
             )
         """)
+        
+        # language 컬럼 추가 (기존 테이블에 없는 경우)
+        try:
+            cursor.execute("ALTER TABLE posts ADD COLUMN language TEXT DEFAULT 'korean'")
+        except sqlite3.OperationalError:
+            pass  # 이미 존재하는 경우
         
         conn.commit()
         conn.close()
