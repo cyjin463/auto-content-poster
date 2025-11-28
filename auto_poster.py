@@ -33,7 +33,7 @@ def load_env_file():
 def ensure_sources_and_disclaimer(content: str) -> str:
     """출처와 면책문구가 있는지 확인하고 없으면 추가"""
     has_sources = "## 참고 출처" in content or "## References" in content
-    has_disclaimer = "본 글의 정보는 100%" in content or "information in this article may not be 100%" in content
+    has_disclaimer = "본 글은 AI를 활용하여" in content or "본 글의 정보는 100%" in content or "information in this article may not be 100%" in content
     
     if not has_sources:
         # 출처 섹션 추가 필요 (경고)
@@ -44,17 +44,17 @@ def ensure_sources_and_disclaimer(content: str) -> str:
         if "## 참고 출처" in content or "References" in content:
             # 출처 다음에 추가
             if "## References" in content:
-                content += "\n\n---\n\n<span style='color: #666; font-size: 0.9em;'>⚠️ The information in this article may not be 100% accurate. Please use it as a reference.</span>"
+                content += "\n\n---\n\n<span style='color: #666; font-size: 0.9em;'>⚠️ This article was generated using AI. The information may not be 100% accurate. Please use it as a reference.</span>"
             else:
-                content += "\n\n---\n\n<span style='color: #666; font-size: 0.9em;'>⚠️ 본 글의 정보는 100% 정확하지 않을 수 있습니다. 참고 자료로 활용하시기 바랍니다.</span>"
+                content += "\n\n---\n\n<span style='color: #666; font-size: 0.9em;'>⚠️ 본 글은 AI를 활용하여 작성되었습니다. 일부 정보는 정확하지 않을 수 있으니 참고용으로만 활용해 주세요.</span>"
         else:
             # 끝에 추가
             if any(keyword in content.lower() for keyword in ['the', 'is', 'are', 'this', 'that']):
                 # 영문으로 판단
-                content += "\n\n---\n\n<span style='color: #666; font-size: 0.9em;'>⚠️ The information in this article may not be 100% accurate. Please use it as a reference.</span>"
+                content += "\n\n---\n\n<span style='color: #666; font-size: 0.9em;'>⚠️ This article was generated using AI. The information may not be 100% accurate. Please use it as a reference.</span>"
             else:
                 # 한글로 판단
-                content += "\n\n---\n\n<span style='color: #666; font-size: 0.9em;'>⚠️ 본 글의 정보는 100% 정확하지 않을 수 있습니다. 참고 자료로 활용하시기 바랍니다.</span>"
+                content += "\n\n---\n\n<span style='color: #666; font-size: 0.9em;'>⚠️ 본 글은 AI를 활용하여 작성되었습니다. 일부 정보는 정확하지 않을 수 있으니 참고용으로만 활용해 주세요.</span>"
     
     return content
 
@@ -84,8 +84,8 @@ def process_single_keyword_dual_language():
     kst = timezone(timedelta(hours=9))
     now_kst = datetime.now(kst)
     
-    # 오늘 오전 10시 기준 (한국 시간)
-    today_10am_kst = now_kst.replace(hour=10, minute=0, second=0, microsecond=0)
+    # 오늘 오전 7시 기준 (한국 시간)
+    today_7am_kst = now_kst.replace(hour=7, minute=0, second=0, microsecond=0)
     
     last_posted = db.get_keyword_last_posted(keyword_id)
     
@@ -96,8 +96,8 @@ def process_single_keyword_dual_language():
         else:
             last_posted_kst = last_posted.astimezone(kst)
         
-        # 오늘 10시 이후에 포스팅이 있었는지 확인
-        if last_posted_kst >= today_10am_kst:
+        # 오늘 7시 이후에 포스팅이 있었는지 확인
+        if last_posted_kst >= today_7am_kst:
             print(f"⏭️  오늘(한국 시간 기준) 이미 포스팅되었습니다. (마지막 포스팅: {last_posted_kst.strftime('%Y-%m-%d %H:%M:%S KST')})")
             return
     
@@ -270,85 +270,132 @@ def process_single_keyword_dual_language():
     
     # 다음 키워드 자동 추론 및 추가
     print(f"\n{'='*60}")
-    print(f"🔮 다음 키워드 추론 중...")
+    print(f"🔄 다음 키워드 활성화 중...")
     print(f"{'='*60}\n")
     
-    try:
-        inference_agent = KeywordInferenceAgent()
+    # 커리큘럼 모드: sequence_number 기반으로 다음 키워드 찾기
+    use_curriculum = os.getenv("USE_CURRICULUM_MODE", "true").lower() == "true"
+    
+    if use_curriculum:
+        # 현재 키워드의 sequence_number 확인
+        conn = db._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT sequence_number FROM keywords WHERE id = ?",
+            (keyword_id,)
+        )
+        row = cursor.fetchone()
+        current_seq = row['sequence_number'] if row else None
+        conn.close()
         
-        # 이전 포스팅 수집
-        previous_posts = db.get_recent_posts_for_keyword(keyword_id, limit=5)
-        parent_posts = db.get_recent_posts_for_parent_keywords(keyword_id, limit=5)
-        all_previous_posts = (previous_posts + parent_posts)[:10]  # 최대 10개
-        
-        # 학습 경로 가져오기
-        learning_path = db.get_keyword_learning_path(keyword_id)
-        
-        inference_input = {
-            "keyword": keyword_name,
-            "previous_posts": all_previous_posts,
-            "learning_path": learning_path
-        }
-        
-        inference_result = inference_agent.process(inference_input)
-        
-        if inference_result.get("status") == "success":
-            next_keyword = inference_result.get("next_keyword")
-            reason = inference_result.get("reason", "")
-            learning_level = inference_result.get("learning_level", "intermediate")
-            connection = inference_result.get("connection", "")
+        if current_seq is not None:
+            # 다음 순서 키워드 찾기
+            next_seq = current_seq + 1
+            conn = db._get_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT id, keyword FROM keywords WHERE sequence_number = ?",
+                (next_seq,)
+            )
+            next_row = cursor.fetchone()
+            conn.close()
             
-            print(f"  💡 추론된 다음 키워드: '{next_keyword}'")
-            print(f"     이유: {reason}")
-            print(f"     연결고리: {connection}")
-            
-            # 다음 키워드가 이미 존재하는지 확인
-            existing_keyword = db.get_keyword_by_name(next_keyword)
-            
-            if not existing_keyword:
-                # 새 키워드 추가
-                next_keyword_id = db.add_keyword(
-                    keyword=next_keyword,
-                    notion_page_id=notion_page_id,
-                    parent_keyword_id=keyword_id,  # 현재 키워드를 부모로
-                    learning_level=learning_level
-                )
-                print(f"  ✅ 다음 키워드 '{next_keyword}' 추가됨 (ID: {next_keyword_id})")
+            if next_row:
+                next_keyword_id = next_row['id']
+                next_keyword_name = next_row['keyword']
                 
-                # 완전 자동화: 현재 키워드 비활성화, 다음 키워드 자동 활성화
-                auto_activate = os.getenv("AUTO_ACTIVATE_NEXT_KEYWORD", "false").lower() == "true"
+                # 완전 자동화: 현재 키워드 비활성화, 다음 키워드 활성화
+                auto_activate = os.getenv("AUTO_ACTIVATE_NEXT_KEYWORD", "true").lower() == "true"
                 
                 if auto_activate:
                     # 현재 키워드 비활성화 (오늘 포스팅 완료했으므로)
                     db.toggle_keyword(keyword_name)
                     # 다음 키워드 활성화
-                    db.toggle_keyword(next_keyword)
-                    print(f"  🔄 완전 자동화 모드: 현재 키워드 '{keyword_name}' 비활성화, 다음 키워드 '{next_keyword}' 자동 활성화")
+                    db.toggle_keyword(next_keyword_name)
+                    print(f"  ✅ 커리큘럼 순서 기반:")
+                    print(f"     이전: [{current_seq}] {keyword_name}")
+                    print(f"     다음: [{next_seq}] {next_keyword_name}")
+                    print(f"  🔄 자동화 모드: 다음 키워드 활성화 완료!")
                 else:
-                    print(f"  💡 현재 키워드 '{keyword_name}'는 활성화 상태를 유지합니다.")
-                    print(f"     다음 키워드 '{next_keyword}'를 활성화하려면:")
-                    print(f"     python3 main.py toggle-keyword \"{next_keyword}\"")
-                    print(f"     (완전 자동화를 원하시면 .env에 AUTO_ACTIVATE_NEXT_KEYWORD=true 추가)")
+                    print(f"  💡 다음 키워드: [{next_seq}] {next_keyword_name}")
+                    print(f"     (AUTO_ACTIVATE_NEXT_KEYWORD=true로 설정하면 자동 활성화됩니다)")
             else:
-                print(f"  ℹ️  다음 키워드 '{next_keyword}'는 이미 존재합니다.")
-                
-                # 완전 자동화: 기존 키워드가 있으면 자동 활성화
-                auto_activate = os.getenv("AUTO_ACTIVATE_NEXT_KEYWORD", "false").lower() == "true"
-                
-                if auto_activate and not existing_keyword.get('is_active'):
-                    # 현재 키워드 비활성화
-                    db.toggle_keyword(keyword_name)
-                    # 다음 키워드 활성화
-                    db.toggle_keyword(next_keyword)
-                    print(f"  🔄 완전 자동화 모드: 기존 키워드 '{next_keyword}' 자동 활성화")
-                
+                print(f"  🎉 모든 커리큘럼을 완료했습니다! (현재: [{current_seq}] {keyword_name})")
         else:
-            print(f"  ⚠️  다음 키워드 추론 실패: {inference_result.get('message', '알 수 없는 오류')}")
+            print(f"  ⚠️  '{keyword_name}' 키워드에 순서 번호가 없습니다. AI 추론 모드로 전환합니다.")
+            use_curriculum = False
+    
+    # AI 추론 모드 (커리큘럼 순서가 없을 때만)
+    if not use_curriculum:
+        try:
+            inference_agent = KeywordInferenceAgent()
             
-    except Exception as e:
-        print(f"  ⚠️  다음 키워드 추론 오류: {e}")
-        import traceback
-        traceback.print_exc()
+            # 이전 포스팅 수집
+            previous_posts = db.get_recent_posts_for_keyword(keyword_id, limit=5)
+            parent_posts = db.get_recent_posts_for_parent_keywords(keyword_id, limit=5)
+            all_previous_posts = (previous_posts + parent_posts)[:10]  # 최대 10개
+            
+            # 학습 경로 가져오기
+            learning_path = db.get_keyword_learning_path(keyword_id)
+            
+            inference_input = {
+                "keyword": keyword_name,
+                "previous_posts": all_previous_posts,
+                "learning_path": learning_path
+            }
+            
+            inference_result = inference_agent.process(inference_input)
+            
+            if inference_result.get("status") == "success":
+                next_keyword = inference_result.get("next_keyword")
+                reason = inference_result.get("reason", "")
+                learning_level = inference_result.get("learning_level", "intermediate")
+                connection = inference_result.get("connection", "")
+                
+                print(f"  💡 AI 추론된 다음 키워드: '{next_keyword}'")
+                print(f"     이유: {reason}")
+                print(f"     연결고리: {connection}")
+                
+                # 다음 키워드가 이미 존재하는지 확인
+                existing_keyword = db.get_keyword_by_name(next_keyword)
+                
+                if not existing_keyword:
+                    # 새 키워드 추가
+                    next_keyword_id = db.add_keyword(
+                        keyword=next_keyword,
+                        notion_page_id=notion_page_id,
+                        parent_keyword_id=keyword_id,  # 현재 키워드를 부모로
+                        learning_level=learning_level
+                    )
+                    print(f"  ✅ 다음 키워드 '{next_keyword}' 추가됨 (ID: {next_keyword_id})")
+                    
+                    # 완전 자동화: 현재 키워드 비활성화, 다음 키워드 자동 활성화
+                    auto_activate = os.getenv("AUTO_ACTIVATE_NEXT_KEYWORD", "false").lower() == "true"
+                    
+                    if auto_activate:
+                        # 현재 키워드 비활성화 (오늘 포스팅 완료했으므로)
+                        db.toggle_keyword(keyword_name)
+                        # 다음 키워드 활성화
+                        db.toggle_keyword(next_keyword)
+                        print(f"  🔄 완전 자동화 모드: 현재 키워드 '{keyword_name}' 비활성화, 다음 키워드 '{next_keyword}' 자동 활성화")
+                else:
+                    # 완전 자동화: 기존 키워드가 있으면 자동 활성화
+                    auto_activate = os.getenv("AUTO_ACTIVATE_NEXT_KEYWORD", "false").lower() == "true"
+                    
+                    if auto_activate and not existing_keyword.get('is_active'):
+                        # 현재 키워드 비활성화
+                        db.toggle_keyword(keyword_name)
+                        # 다음 키워드 활성화
+                        db.toggle_keyword(next_keyword)
+                        print(f"  🔄 완전 자동화 모드: 기존 키워드 '{next_keyword}' 자동 활성화")
+                    
+            else:
+                print(f"  ⚠️  다음 키워드 추론 실패: {inference_result.get('message', '알 수 없는 오류')}")
+                
+        except Exception as e:
+            print(f"  ⚠️  다음 키워드 추론 오류: {e}")
+            import traceback
+            traceback.print_exc()
     
     print(f"\n{'='*60}")
     print(f"✅ 자동 포스팅 완료!")

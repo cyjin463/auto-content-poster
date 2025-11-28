@@ -124,6 +124,33 @@ class Database:
         
         return [dict(row) for row in rows]
     
+    def get_recent_posts_by_language(self, language: str = 'korean', limit: int = 4, exclude_keyword_id: str = None) -> List[Dict]:
+        """언어별 최근 포스팅 목록 조회 (현재 키워드 제외)"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        
+        if exclude_keyword_id:
+            cursor.execute("""
+                SELECT title, content, created_at, keyword_id 
+                FROM posts 
+                WHERE language = ? AND keyword_id != ?
+                ORDER BY created_at DESC 
+                LIMIT ?
+            """, (language, exclude_keyword_id, limit))
+        else:
+            cursor.execute("""
+                SELECT title, content, created_at, keyword_id 
+                FROM posts 
+                WHERE language = ?
+                ORDER BY created_at DESC 
+                LIMIT ?
+            """, (language, limit))
+        
+        rows = cursor.fetchall()
+        conn.close()
+        
+        return [dict(row) for row in rows]
+    
     def get_recent_posts_for_parent_keywords(self, keyword_id: str, limit: int = 10) -> List[Dict]:
         """부모 키워드들의 최근 포스팅 조회"""
         learning_path = self.get_keyword_learning_path(keyword_id)
@@ -152,7 +179,7 @@ class Database:
         
         return [dict(row) for row in rows]
     
-    def add_keyword(self, keyword: str, notion_page_id: Optional[str] = None, parent_keyword_id: Optional[str] = None, learning_level: Optional[str] = None) -> str:
+    def add_keyword(self, keyword: str, category: Optional[str] = None, notion_page_id: Optional[str] = None, parent_keyword_id: Optional[str] = None, learning_level: Optional[str] = None, is_active: bool = True, sequence_number: Optional[int] = None) -> str:
         """키워드 추가"""
         import uuid
         keyword_id = str(uuid.uuid4())
@@ -164,18 +191,35 @@ class Database:
         cursor.execute("PRAGMA table_info(keywords)")
         columns = {row[1]: row[2] for row in cursor.fetchall()}
         
+        # 기본 필드
+        fields = ["id", "keyword", "is_active"]
+        values = [keyword_id, keyword, 1 if is_active else 0]
+        
+        # 선택적 필드 추가
+        if 'notion_page_id' in columns and notion_page_id:
+            fields.append("notion_page_id")
+            values.append(notion_page_id)
+        
+        if 'parent_keyword_id' in columns and parent_keyword_id:
+            fields.append("parent_keyword_id")
+            values.append(parent_keyword_id)
+        
+        if 'learning_level' in columns and learning_level:
+            fields.append("learning_level")
+            values.append(learning_level)
+        
+        if 'sequence_number' in columns and sequence_number is not None:
+            fields.append("sequence_number")
+            values.append(sequence_number)
+        
+        placeholders = ','.join(['?'] * len(values))
+        field_names = ','.join(fields)
+        
         try:
-            # parent_keyword_id와 learning_level 컬럼이 있으면 포함하여 삽입
-            if 'parent_keyword_id' in columns and 'learning_level' in columns:
-                cursor.execute("""
-                    INSERT INTO keywords (id, keyword, notion_page_id, parent_keyword_id, learning_level)
-                    VALUES (?, ?, ?, ?, ?)
-                """, (keyword_id, keyword, notion_page_id, parent_keyword_id, learning_level))
-            else:
-                cursor.execute("""
-                    INSERT INTO keywords (id, keyword, notion_page_id)
-                    VALUES (?, ?, ?)
-                """, (keyword_id, keyword, notion_page_id))
+            cursor.execute(f"""
+                INSERT INTO keywords ({field_names})
+                VALUES ({placeholders})
+            """, values)
             conn.commit()
             return keyword_id
         except sqlite3.IntegrityError:
@@ -387,29 +431,43 @@ class Database:
         return post_id
     
     def update_keyword_last_checked(self, keyword_id: str):
-        """키워드 마지막 확인 시간 업데이트"""
+        """키워드 마지막 확인 시간 업데이트 (한국 시간 KST 기준)"""
+        from datetime import timezone, timedelta
+        
         conn = self._get_connection()
         cursor = conn.cursor()
         
+        # 한국 시간(KST, UTC+9) 기준으로 현재 시간 저장
+        kst = timezone(timedelta(hours=9))
+        now_kst = datetime.now(kst)
+        timestamp_str = now_kst.isoformat()
+        
         cursor.execute("""
             UPDATE keywords 
-            SET last_checked = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+            SET last_checked = ?, updated_at = ?
             WHERE id = ?
-        """, (keyword_id,))
+        """, (timestamp_str, timestamp_str, keyword_id))
         
         conn.commit()
         conn.close()
     
     def update_keyword_last_posted(self, keyword_id: str):
-        """키워드 마지막 포스팅 시간 업데이트"""
+        """키워드 마지막 포스팅 시간 업데이트 (한국 시간 KST 기준)"""
+        from datetime import timezone, timedelta
+        
         conn = self._get_connection()
         cursor = conn.cursor()
         
+        # 한국 시간(KST, UTC+9) 기준으로 현재 시간 저장
+        kst = timezone(timedelta(hours=9))
+        now_kst = datetime.now(kst)
+        timestamp_str = now_kst.isoformat()
+        
         cursor.execute("""
             UPDATE keywords 
-            SET last_posted = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+            SET last_posted = ?, updated_at = ?
             WHERE id = ?
-        """, (keyword_id,))
+        """, (timestamp_str, timestamp_str, keyword_id))
         
         conn.commit()
         conn.close()

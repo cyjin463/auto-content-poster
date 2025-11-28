@@ -175,7 +175,7 @@ def generate_content(keywords: str, category: str, search_results: List[Dict]) -
         sources_section += "검색 결과를 기반으로 작성되었습니다.\n"
     
     # 면책 문구 추가 (티스토리 호환 형식)
-    disclaimer = "\n\n---\n\n<span style='color: #666; font-size: 0.9em;'>⚠️ 본 글의 정보는 100% 정확하지 않을 수 있습니다. 참고 자료로 활용하시기 바랍니다.</span>"
+    disclaimer = "\n\n---\n\n<span style='color: #666; font-size: 0.9em;'>⚠️ 본 글은 AI를 활용하여 작성되었습니다. 일부 정보는 정확하지 않을 수 있으니 참고용으로만 활용해 주세요.</span>"
     
     content_text = content_text + sources_section + disclaimer
     
