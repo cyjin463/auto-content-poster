@@ -84,6 +84,15 @@ def process_single_keyword_dual_language():
     kst = timezone(timedelta(hours=9))
     now_kst = datetime.now(kst)
     
+    # 토요일(5), 일요일(6) 체크 - 포스팅 건너뛰기
+    weekday = now_kst.weekday()  # 0=월요일, 5=토요일, 6=일요일
+    if weekday == 5:  # 토요일
+        print(f"⏭️  토요일(한국 시간)이므로 포스팅을 건너뜁니다.")
+        return
+    if weekday == 6:  # 일요일
+        print(f"⏭️  일요일(한국 시간)이므로 포스팅을 건너뜁니다.")
+        return
+    
     # 오늘 오전 7시 기준 (한국 시간)
     today_7am_kst = now_kst.replace(hour=7, minute=0, second=0, microsecond=0)
     
@@ -118,21 +127,56 @@ def process_single_keyword_dual_language():
             
             # 한글 포스팅 (skip_posting=True로 설정했으므로 여기서 포스팅)
             print(f"  📝 한글 포스팅 중...")
-            from notion_api import create_notion_page
-            notion_result_korean = create_notion_page(
-                title=content_korean['title'],
-                content=content_korean['content'],
-                parent_page_id=notion_page_id,
-                database_id=os.getenv("NOTION_DATABASE_ID")
-            )
-            
             page_id_korean = None
-            if notion_result_korean.get("status") == "success":
-                page_id_korean = notion_result_korean.get('page_id')
-                page_url_korean = notion_result_korean.get('page_url')
-                print(f"  ✅ 한글 포스팅 완료: {page_url_korean or ''}")
-            else:
-                print(f"  ❌ 한글 포스팅 실패")
+            page_url_korean = None
+            try:
+                from notion_api import create_notion_page
+                
+                # 환경 변수 확인
+                database_id = os.getenv("NOTION_DATABASE_ID")
+                if not database_id and not notion_page_id:
+                    print(f"  ❌ 한글 포스팅 실패: NOTION_DATABASE_ID 또는 NOTION_PARENT_PAGE_ID가 설정되지 않았습니다.")
+                    return
+                
+                print(f"     parent_page_id: {notion_page_id or 'None'}")
+                print(f"     database_id: {database_id or 'None'}")
+                
+                notion_result_korean = create_notion_page(
+                    title=content_korean['title'],
+                    content=content_korean['content'],
+                    parent_page_id=notion_page_id,
+                    database_id=database_id
+                )
+                
+                print(f"     API 응답 수신 완료")
+                
+                if notion_result_korean and notion_result_korean.get("status") == "success":
+                    page_id_korean = notion_result_korean.get('page_id')
+                    page_url_korean = notion_result_korean.get('page_url')
+                    if page_id_korean:
+                        print(f"  ✅ 한글 포스팅 완료!")
+                        print(f"     페이지 ID: {page_id_korean}")
+                        print(f"     페이지 URL: {page_url_korean or 'N/A'}")
+                    else:
+                        print(f"  ⚠️  한글 포스팅 응답은 받았으나 page_id가 없습니다.")
+                        print(f"     응답: {notion_result_korean}")
+                else:
+                    error_msg = notion_result_korean.get("message", "알 수 없는 오류") if notion_result_korean else "결과를 받지 못함"
+                    print(f"  ❌ 한글 포스팅 실패: {error_msg}")
+                    if notion_result_korean:
+                        print(f"     상세 오류: {notion_result_korean.get('error', 'N/A')}")
+                        print(f"     전체 응답: {notion_result_korean}")
+                    return
+            except ValueError as e:
+                print(f"  ❌ 한글 포스팅 실패 (ValueError): {e}")
+                import traceback
+                traceback.print_exc()
+                return
+            except Exception as e:
+                print(f"  ❌ 한글 포스팅 중 예외 발생: {type(e).__name__}: {e}")
+                import traceback
+                print(f"     상세 오류:")
+                traceback.print_exc()
                 return
             
             # 데이터베이스에 저장
