@@ -1,6 +1,6 @@
 """
 스케줄러 (크론 작업용)
-매일 오전 7시에 자동 실행
+매일 오전 9시 10분에 자동 실행 (GROQ 초기화 후)
 """
 
 import sys
@@ -18,7 +18,7 @@ def run_scheduled_tasks(db: Database = None):
     if db is None:
         db = Database()
     
-    print("⏰ 크론 작업 시작 (매일 오전 7시)")
+    print("⏰ 크론 작업 시작 (매일 오전 9시 10분 - GROQ 초기화 후)")
     print("=" * 60)
     
     # 순환 import 방지를 위해 함수 내부에서 import

@@ -284,8 +284,8 @@ def process_single_keyword_dual_language():
         print(f"⏭️  일요일(한국 시간)이므로 포스팅을 건너뜁니다.")
         return
     
-    # 오늘 오전 7시 기준 (한국 시간)
-    today_7am_kst = now_kst.replace(hour=7, minute=0, second=0, microsecond=0)
+    # 오늘 오전 9시 10분 기준 (한국 시간, GROQ 초기화 후)
+    today_9_10am_kst = now_kst.replace(hour=9, minute=10, second=0, microsecond=0)
     
     last_posted = db.get_keyword_last_posted(keyword_id)
     
@@ -296,8 +296,8 @@ def process_single_keyword_dual_language():
         else:
             last_posted_kst = last_posted.astimezone(kst)
         
-        # 오늘 7시 이후에 포스팅이 있었는지 확인
-        if last_posted_kst >= today_7am_kst:
+        # 오늘 9시 10분 이후에 포스팅이 있었는지 확인
+        if last_posted_kst >= today_9_10am_kst:
             print(f"⏭️  오늘(한국 시간 기준) 이미 포스팅되었습니다. (마지막 포스팅: {last_posted_kst.strftime('%Y-%m-%d %H:%M:%S KST')})")
             return
     

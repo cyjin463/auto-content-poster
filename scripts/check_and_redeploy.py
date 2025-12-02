@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 자동 배포 확인 및 재배포 스크립트
-매일 오전 7시 30분에 실행되어 이전 배포 상태를 확인하고
+매일 오전 9시 30분에 실행되어 이전 배포 상태를 확인하고
 오류가 있으면 수정 후 재배포
 """
 
@@ -31,13 +31,13 @@ def check_recent_posts():
     kst = timezone(timedelta(hours=9))
     now_kst = datetime.now(kst)
     
-    # 오늘 7시 이후 포스팅 확인
-    today_7am_kst = now_kst.replace(hour=7, minute=0, second=0, microsecond=0)
+    # 오늘 9시 10분 이후 포스팅 확인
+    today_9_10am_kst = now_kst.replace(hour=9, minute=10, second=0, microsecond=0)
     
-    print("🔍 자동 배포 확인 시작 (7시 30분)")
+    print("🔍 자동 배포 확인 시작 (9시 30분)")
     print("=" * 60)
     
-    # 오늘 7시 이후 포스팅 조회
+    # 오늘 9시 10분 이후 포스팅 조회
     conn = db._get_connection()
     cursor = conn.cursor()
     
@@ -50,15 +50,15 @@ def check_recent_posts():
         LIMIT 10
     """
     
-    # KST 기준으로 오늘 7시 이후 포스팅 확인
-    today_7am_utc = (today_7am_kst - timedelta(hours=9)).strftime('%Y-%m-%d %H:%M:%S')
-    cursor.execute(query, (today_7am_utc,))
+    # KST 기준으로 오늘 9시 10분 이후 포스팅 확인
+    today_9_10am_utc = (today_9_10am_kst - timedelta(hours=9)).strftime('%Y-%m-%d %H:%M:%S')
+    cursor.execute(query, (today_9_10am_utc,))
     
     posts = cursor.fetchall()
     conn.close()
     
     if not posts:
-        print("📝 오늘 7시 이후 포스팅이 없습니다.")
+        print("📝 오늘 9시 10분 이후 포스팅이 없습니다.")
         print("   → 자동 포스팅이 실행되지 않았거나 실패했을 수 있습니다.")
         
         # 자동 포스팅 재시도
@@ -74,7 +74,7 @@ def check_recent_posts():
         return
     
     # 포스팅 상태 확인
-    print(f"📊 오늘 7시 이후 포스팅: {len(posts)}건\n")
+    print(f"📊 오늘 9시 10분 이후 포스팅: {len(posts)}건\n")
     
     issues_found = False
     posts_to_fix = []
