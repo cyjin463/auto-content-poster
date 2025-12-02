@@ -12,6 +12,7 @@ import sys
 import os
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
+import subprocess
 
 # 프로젝트 루트를 Python 경로에 추가
 project_root = Path(__file__).parent.parent
@@ -25,6 +26,92 @@ load_env_file()
 from src.core.database import Database
 from agents.agent_chain import AgentChain
 from agents.keyword_inference_agent import KeywordInferenceAgent
+
+
+def commit_and_push_posting(keyword: str, timestamp: datetime = None):
+    """
+    포스팅 완료 후 Git 커밋 및 push
+    커밋 메시지: "키워드 : {키워드}, {년}년{월}월{일}일 {시}시{분}분 포스팅 완료"
+    예시: "키워드 : 데이터, 2025년12월2일 15시30분 포스팅 완료"
+    """
+    if timestamp is None:
+        # 한국 시간(KST, UTC+9) 기준
+        kst = timezone(timedelta(hours=9))
+        timestamp = datetime.now(kst)
+    
+    # 커밋 메시지 형식: "키워드 : 데이터, 2025년12월2일 15시30분 포스팅 완료"
+    commit_message = f"키워드 : {keyword}, {timestamp.year}년{timestamp.month}월{timestamp.day}일 {timestamp.hour}시{timestamp.minute}분 포스팅 완료"
+    
+    try:
+        # Git 저장소인지 확인
+        result = subprocess.run(
+            ["git", "rev-parse", "--git-dir"],
+            cwd=project_root,
+            capture_output=True,
+            text=True
+        )
+        if result.returncode != 0:
+            print(f"  ⚠️  Git 저장소가 아닙니다. 커밋을 건너뜁니다.")
+            return
+        
+        # 변경사항 확인
+        result = subprocess.run(
+            ["git", "status", "--porcelain"],
+            cwd=project_root,
+            capture_output=True,
+            text=True
+        )
+        
+        has_changes = bool(result.stdout.strip())
+        
+        if has_changes:
+            # 변경사항이 있으면 add
+            print(f"\n  📝 Git 커밋 준비 중...")
+            subprocess.run(
+                ["git", "add", "."],
+                cwd=project_root,
+                check=True,
+                capture_output=True
+            )
+        
+        # 커밋 (변경사항이 없어도 빈 커밋 허용 - 포스팅 완료 기록용)
+        print(f"  📝 커밋 메시지: {commit_message}")
+        if has_changes:
+            # 변경사항이 있으면 일반 커밋
+            subprocess.run(
+                ["git", "commit", "-m", commit_message],
+                cwd=project_root,
+                check=True,
+                capture_output=True
+            )
+        else:
+            # 변경사항이 없어도 빈 커밋 생성 (포스팅 완료 기록용)
+            print(f"  ℹ️  변경사항 없음. 포스팅 완료 기록을 위한 빈 커밋 생성...")
+            subprocess.run(
+                ["git", "commit", "--allow-empty", "-m", commit_message],
+                cwd=project_root,
+                check=True,
+                capture_output=True
+            )
+        
+        # Push (origin main)
+        print(f"  📤 GitHub에 push 중...")
+        push_result = subprocess.run(
+            ["git", "push", "origin", "main"],
+            cwd=project_root,
+            capture_output=True,
+            text=True
+        )
+        
+        if push_result.returncode == 0:
+            print(f"  ✅ Git push 완료!")
+        else:
+            print(f"  ⚠️  Git push 실패: {push_result.stderr}")
+            
+    except subprocess.CalledProcessError as e:
+        print(f"  ⚠️  Git 커밋/푸시 중 오류: {e}")
+    except Exception as e:
+        print(f"  ⚠️  Git 커밋/푸시 중 예외 발생: {e}")
 
 
 def ensure_sources_and_disclaimer(content: str) -> str:
@@ -431,6 +518,22 @@ def process_single_keyword_dual_language():
         # 키워드 상태 업데이트
         db.update_keyword_last_checked(keyword_id)
         db.update_keyword_last_posted(keyword_id)
+        
+        # Git 커밋 및 push (포스팅 완료 기록)
+        print(f"\n{'='*60}")
+        print(f"📝 Git 커밋 및 Push")
+        print(f"{'='*60}\n")
+        kst = timezone(timedelta(hours=9))
+        now_kst = datetime.now(kst)
+        commit_and_push_posting(keyword_name, now_kst)
+        
+        # Git 커밋 및 push
+        print(f"\n{'='*60}")
+        print(f"📝 Git 커밋 및 Push")
+        print(f"{'='*60}\n")
+        kst = timezone(timedelta(hours=9))
+        now_kst = datetime.now(kst)
+        commit_and_push_posting(keyword_name, now_kst)
         
         # 다음 키워드 활성화
         print(f"\n{'='*60}")
