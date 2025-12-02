@@ -4,7 +4,7 @@
 
 from typing import Dict, Any
 from agents.base import BaseAgent
-from notion_poster import publish_to_notion
+from src.services.notion import publish_to_notion
 import os
 
 

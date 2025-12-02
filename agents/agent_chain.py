@@ -129,29 +129,81 @@ class AgentChain:
             if fact_check_issues:
                 revision_issues.extend(fact_check_issues)
             
-            # 4-1단계: 콘텐츠 수정 (문제가 있는 경우)
-            if revision_issues:
-                print("\n[4-1단계] 콘텐츠 수정")
+            # 4-1단계: 콘텐츠 수정 및 재검증 반복 (통과될 때까지)
+            max_revision_attempts = 3  # 최대 3회 시도
+            revision_attempt = 0
+            
+            while revision_issues and revision_attempt < max_revision_attempts:
+                revision_attempt += 1
+                print(f"\n[4-1단계] 콘텐츠 수정 (시도 {revision_attempt}/{max_revision_attempts})")
                 revision_input = {
                     "content": main_content,  # 본문만 수정 (키워드/카테고리 제외)
                     "title": content_result["title"],
                     "issues": revision_issues,
-                    "search_results": validated_results
+                    "search_results": validated_results,
+                    "language": language  # 언어 정보 전달
                 }
                 revision_result = self.content_revision_agent.process(revision_input)
-                self.execution_log.append({"step": "content_revision", "result": revision_result})
+                self.execution_log.append({"step": "content_revision", "attempt": revision_attempt, "result": revision_result})
                 
                 if revision_result.get("status") == "revised":
                     content_to_revise = revision_result["revised_content"]
+                    
+                    # 언어별 후처리: 한자/외국어 또는 한글 제거
+                    if language == 'korean':
+                        from src.utils.helpers import remove_hanja_from_text
+                        content_to_revise = remove_hanja_from_text(content_to_revise)
+                    elif language == 'english':
+                        # 영문 모드일 때: 수정 후 한글 제거 강제 적용
+                        from src.utils.helpers import remove_korean_from_english_text
+                        content_to_revise = remove_korean_from_english_text(content_to_revise)
+                        # 제목도 수정 결과에서 가져와서 한글 제거
+                        if 'title' in revision_result:
+                            revision_result['title'] = remove_korean_from_english_text(revision_result.get('title', ''))
+                    
                     # 수정된 본문에 키워드/카테고리 섹션 다시 추가
                     if footer_section:
                         content_to_revise = content_to_revise + footer_section
-                        print(f"  ✅ 콘텐츠 수정 완료 ({len(revision_result.get('revisions', []))}개 수정, 키워드/카테고리 섹션 유지)")
-                    else:
-                        print(f"  ✅ 콘텐츠 수정 완료 ({len(revision_result.get('revisions', []))}개 수정)")
+                    
                     # 수정된 콘텐츠로 업데이트
                     content_result["content"] = content_to_revise
                     content_result["revisions"] = revision_result.get("revisions", [])
+                    
+                    print(f"  ✅ 콘텐츠 수정 완료 ({len(revision_result.get('revisions', []))}개 수정)")
+                    
+                    # 재검증
+                    print(f"\n[4-2단계] 수정된 콘텐츠 재검증 중...")
+                    revalidation_input = {
+                        "keyword": keyword,
+                        "title": content_result["title"],
+                        "content": content_result["content"],
+                        "language": language
+                    }
+                    revalidation_result = self.content_validation_agent.process(revalidation_input)
+                    self.execution_log.append({"step": "content_revalidation", "attempt": revision_attempt, "result": revalidation_result})
+                    
+                    # 재검증 결과 확인
+                    if revalidation_result.get("is_valid", False):
+                        print(f"  ✅ 재검증 통과!")
+                        revision_issues = []  # 이슈 해결됨
+                        content_validation_result = revalidation_result  # 최신 검증 결과로 업데이트
+                    else:
+                        # 재검증 실패, 새로운 이슈 수집
+                        revision_issues = revalidation_result.get("issues", [])
+                        if fact_check_issues:
+                            revision_issues.extend(fact_check_issues)
+                        print(f"  ⚠️  재검증 실패: {len(revision_issues)}개 이슈 남음")
+                        
+                        # 본문 다시 분리 (재수정을 위해)
+                        footer_match = re.search(footer_pattern, content_to_revise, re.DOTALL)
+                        footer_section = footer_match.group(1) if footer_match else ""
+                        main_content = content_to_revise[:footer_match.start()] if footer_match else content_to_revise
+                else:
+                    print(f"  ⚠️  수정 실패, 다음 시도...")
+                    break
+            
+            if revision_issues and revision_attempt >= max_revision_attempts:
+                print(f"  ⚠️  최대 수정 시도 횟수({max_revision_attempts})에 도달했습니다. 현재 상태로 진행합니다.")
             
             if not content_validation_result.get("is_valid", False) and not revision_issues:
                 return {

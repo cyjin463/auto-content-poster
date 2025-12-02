@@ -8,22 +8,8 @@ from typing import Dict, Any, List, Optional
 from abc import ABC, abstractmethod
 
 
-def load_env_file():
-    """.env 파일에서 환경 변수 로드"""
-    env_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), '.env')
-    if os.path.exists(env_path):
-        with open(env_path, 'r', encoding='utf-8') as f:
-            for line in f:
-                line = line.strip()
-                if line and not line.startswith('#') and '=' in line:
-                    key, value = line.split('=', 1)
-                    key = key.strip()
-                    value = value.strip().strip('"').strip("'")
-                    if key and value:
-                        os.environ[key] = value
-
-
-# .env 파일 로드
+# 환경 변수 로드 (공통 모듈 사용)
+from src.core.config import load_env_file
 load_env_file()
 
 
@@ -178,7 +164,6 @@ class BaseAgent(ABC):
                         print(f"  🔄 {next_key_name}로 전환 시도 중... (시도 {attempt + 1}/{max_retries})")
                     else:
                         print(f"  ⚠️  모든 API 키 Rate Limit 감지 (시도 {attempt + 1}/{max_retries})")
-                        print(f"  ⏭️  다음날 재시도 예정")
                     
                     last_error = Exception(f"Groq API Rate Limit: {error_msg}")
                     continue
@@ -204,7 +189,6 @@ class BaseAgent(ABC):
                         print(f"  🔄 {next_key_name}로 전환 시도 중... (시도 {attempt + 1}/{max_retries})")
                     else:
                         print(f"  ⚠️  모든 API 키 Rate Limit 감지 (시도 {attempt + 1}/{max_retries})")
-                        print(f"  ⏭️  다음날 재시도 예정")
                     
                     last_error = e
                     continue
@@ -216,6 +200,12 @@ class BaseAgent(ABC):
             raise last_error
         else:
             raise Exception("모든 Groq API 키가 사용 불가능합니다.")
+    
+    def _call_llm(self, messages: List[Dict[str, str]], response_format: Optional[Dict] = None, max_retries: int = None) -> str:
+        """
+        LLM 호출 (GROQ만 사용)
+        """
+        return self._call_groq(messages, response_format, max_retries)
     
     @abstractmethod
     def process(self, input_data: Any) -> Dict[str, Any]:

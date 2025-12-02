@@ -2,16 +2,15 @@
 콘텐츠 생성 에이전트: 검증된 검색 결과 기반 콘텐츠 생성
 """
 
-from typing import Dict, Any
+from typing import Dict, Any, List
 from agents.base import BaseAgent
 import json
 import sys
 import os
 
-# utils 모듈 import
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from utils import validate_korean_content
-from database import Database
+# 모듈 import
+from src.utils.helpers import validate_korean_content
+from src.core.database import Database
 
 
 class ContentGenerationAgent(BaseAgent):
@@ -38,19 +37,56 @@ class ContentGenerationAgent(BaseAgent):
         )
         
         if not previous_posts or len(previous_posts) == 0:
-            return "이전 포스팅이 없습니다. 최초 포스팅입니다."
+            return "이전 포스팅이 없습니다. 최초 포스팅입니다." if language == 'korean' else "No previous posts. This is the first post."
         
         print(f"  📚 [{self.name}] 이전 포스팅 {len(previous_posts)}개 분석 중... ({'한글' if language == 'korean' else '영문'})")
         
-        # 이전 포스팅 요약 생성 (제목과 본문 일부)
+        # 언어별 이전 포스팅 요약 생성 (제목과 본문 일부)
         previous_posts_summary = ""
         for i, post in enumerate(previous_posts, 1):
-            title = post.get('title', '제목 없음')
+            title = post.get('title', '제목 없음' if language == 'korean' else 'No Title')
             content_preview = post.get('content', '')[:500]  # 처음 500자만
-            previous_posts_summary += f"\n[{i}] 제목: {title}\n내용 일부: {content_preview}...\n"
+            if language == 'english':
+                previous_posts_summary += f"\n[{i}] Title: {title}\nContent preview: {content_preview}...\n"
+            else:  # korean
+                previous_posts_summary += f"\n[{i}] 제목: {title}\n내용 일부: {content_preview}...\n"
         
-        # 이전 포스팅 분석 프롬프트
-        analysis_prompt = f"""다음은 이전에 작성된 {len(previous_posts)}개의 포스팅입니다. 
+        # 언어별 이전 포스팅 분석 프롬프트
+        if language == 'english':
+            analysis_prompt = f"""The following are {len(previous_posts)} previously written blog posts. 
+
+Previous Posts:
+{previous_posts_summary}
+
+⚠️ **Important**: Analyze the previous posts and identify the following to derive improvement points:
+
+1. **Mechanical Pattern Detection**:
+   - Are titles repetitive or following fixed patterns?
+   - Are introduction opening phrases identical?
+   - Are sentence structures too similar?
+   - Is word choice not diverse enough?
+
+2. **Naturalness Assessment**:
+   - Is the tone too rigid or formal?
+   - Are conjunctions and transition sentences lacking?
+   - Are examples and cases insufficient?
+   - Are personal experiences and subjective expressions lacking?
+
+3. **Improvement Direction**:
+   - What parts should be written differently?
+   - What patterns should be avoided?
+   - What styles should be added?
+
+Please respond in the following JSON format:
+{{
+  "mechanical_patterns": ["Found mechanical pattern 1", "Found mechanical pattern 2"],
+  "improvement_suggestions": ["Improvement suggestion 1", "Improvement suggestion 2"],
+  "avoid_patterns": ["Pattern to avoid 1", "Pattern to avoid 2"],
+  "add_variations": ["Variation to add 1", "Variation to add 2"]
+}}"""
+            system_message = "You are a blog content analysis expert. You analyze previous posts to identify mechanical patterns and suggest directions for more natural and human-like writing. You also evaluate readability (paragraph length, subheadings, lists, bold text usage, etc.) to suggest ways to create reader-friendly content."
+        else:  # korean
+            analysis_prompt = f"""다음은 이전에 작성된 {len(previous_posts)}개의 포스팅입니다.
 
 이전 포스팅들:
 {previous_posts_summary}
@@ -81,11 +117,12 @@ class ContentGenerationAgent(BaseAgent):
   "avoid_patterns": ["피해야 할 패턴 1", "피해야 할 패턴 2"],
   "add_variations": ["추가해야 할 변형 1", "추가해야 할 변형 2"]
 }}"""
+            system_message = "당신은 블로그 콘텐츠 분석 전문가입니다. 이전 포스팅들을 분석하여 기계적인 패턴을 찾고, 더 자연스럽고 인간적인 글쓰기 방향을 제안합니다. 또한 가독성(문단 길이, 소제목, 리스트, 볼드체 사용 등)도 평가하여 독자가 읽기 쉬운 글을 만드는 방법을 제안합니다."
         
         messages = [
             {
                 "role": "system",
-                "content": "당신은 블로그 콘텐츠 분석 전문가입니다. 이전 포스팅들을 분석하여 기계적인 패턴을 찾고, 더 자연스럽고 인간적인 글쓰기 방향을 제안합니다."
+                "content": system_message
             },
             {
                 "role": "user",
@@ -94,28 +131,151 @@ class ContentGenerationAgent(BaseAgent):
         ]
         
         try:
-            response = self._call_groq(messages, response_format={"type": "json_object"})
+            response = self._call_llm(messages, response_format={"type": "json_object"})
+            analysis_result = json.loads(response)
+            
+            # 분석 결과를 요약된 지침으로 변환 (언어별)
+            improvements = []
+            if language == 'english':
+                if analysis_result.get("mechanical_patterns"):
+                    improvements.append(f"❌ Patterns to avoid: {', '.join(analysis_result['mechanical_patterns'][:3])}")
+                if analysis_result.get("readability_issues"):
+                    improvements.append(f"📖 Readability issues: {', '.join(analysis_result['readability_issues'][:3])}")
+                if analysis_result.get("improvement_suggestions"):
+                    improvements.append(f"✅ Improvement suggestions: {', '.join(analysis_result['improvement_suggestions'][:3])}")
+                if analysis_result.get("avoid_patterns"):
+                    improvements.append(f"⚠️ Avoid patterns: {', '.join(analysis_result['avoid_patterns'][:3])}")
+                if analysis_result.get("add_variations"):
+                    improvements.append(f"➕ Add variations: {', '.join(analysis_result['add_variations'][:3])}")
+                if analysis_result.get("readability_suggestions"):
+                    improvements.append(f"📚 Readability improvements: {', '.join(analysis_result['readability_suggestions'][:3])}")
+                
+                if improvements:
+                    return "\n".join(improvements)
+                else:
+                    return "Previous posts analysis complete. Write in a natural and diverse style."
+            else:  # korean
+                if analysis_result.get("mechanical_patterns"):
+                    improvements.append(f"❌ 피해야 할 패턴: {', '.join(analysis_result['mechanical_patterns'][:3])}")
+                if analysis_result.get("readability_issues"):
+                    improvements.append(f"📖 가독성 문제: {', '.join(analysis_result['readability_issues'][:3])}")
+                if analysis_result.get("improvement_suggestions"):
+                    improvements.append(f"✅ 개선 제안: {', '.join(analysis_result['improvement_suggestions'][:3])}")
+                if analysis_result.get("avoid_patterns"):
+                    improvements.append(f"⚠️ 회피 패턴: {', '.join(analysis_result['avoid_patterns'][:3])}")
+                if analysis_result.get("add_variations"):
+                    improvements.append(f"➕ 추가 변형: {', '.join(analysis_result['add_variations'][:3])}")
+                if analysis_result.get("readability_suggestions"):
+                    improvements.append(f"📚 가독성 개선: {', '.join(analysis_result['readability_suggestions'][:3])}")
+                
+                if improvements:
+                    return "\n".join(improvements)
+                else:
+                    return "이전 포스팅 분석 완료. 자연스럽고 다양한 스타일로 작성해야 합니다."
+                
+        except Exception as e:
+            print(f"  ⚠️  [{self.name}] 이전 포스팅 분석 실패: {e}")
+            return "이전 포스팅 분석 실패. 기본 가이드라인을 따르세요." if language == 'korean' else "Previous posts analysis failed. Follow the default guidelines."
+    
+    def _analyze_previous_posts_from_cache(self, language: str, keyword: str = None, cached_posts: List[Dict] = None) -> str:
+        """캐시된 이전 포스팅을 분석하여 개선점 도출 (Notion 참조 없음)"""
+        if not cached_posts or len(cached_posts) == 0:
+            return "캐시된 이전 포스팅이 없습니다. 최초 포스팅입니다."
+        
+        print(f"  📚 [{self.name}] 캐시된 포스팅 {len(cached_posts)}개 분석 중... ({'한글' if language == 'korean' else '영문'})")
+        
+        # 캐시된 포스팅 요약 생성 (제목과 본문 일부)
+        previous_posts_summary = ""
+        for i, post in enumerate(cached_posts, 1):
+            title = post.get('title', '제목 없음')
+            content_preview = post.get('content', '')[:500]  # 처음 500자만
+            previous_posts_summary += f"\n[{i}] 제목: {title}\n내용 일부: {content_preview}...\n"
+        
+        # 이전 포스팅 분석 프롬프트 (가독성 평가 포함)
+        analysis_prompt = f"""다음은 이전에 작성된 {len(cached_posts)}개의 포스팅입니다. 
+
+이전 포스팅들:
+{previous_posts_summary}
+
+⚠️ **중요**: 이전 포스팅들을 분석하여 다음을 확인하고 개선점을 도출해주세요:
+
+1. **기계적인 패턴 확인**:
+   - 제목이 반복적이거나 고정 패턴인가?
+   - 서론 시작 문구가 똑같은가?
+   - 문장 구조가 모두 비슷한가?
+   - 단어 선택이 다양하지 않은가?
+
+2. **자연스러움 평가**:
+   - 말투가 너무 딱딱하거나 정형적인가?
+   - 접속사와 전환 문장이 부족한가?
+   - 예시와 사례가 부족한가?
+   - 개인 경험과 주관적 표현이 부족한가?
+
+3. **가독성 평가 (매우 중요!)**:
+   - 문단이 너무 길거나 짧은가? (적절한 길이는 3-5문장)
+   - 문장이 너무 길어서 읽기 어려운가? (한 문장은 20-30단어 이내가 적절)
+   - 소제목이 충분히 사용되었는가? (본문에 3-4개 이상)
+   - 리스트(1., 2., 3. 또는 -, -)가 적절히 사용되었는가?
+   - 볼드체(**텍스트**)가 중요 정보 강조에 사용되었는가?
+   - 문단 사이 빈 줄이 있어서 읽기 편한가?
+   - 전체적인 구조와 흐름이 명확한가?
+   - 긴 문단이 통으로 작성되어 있는가? (나눠야 함)
+   - 정보가 밀집되어 있어서 읽기 피로한가?
+
+4. **개선 방향**:
+   - 어떤 부분을 다르게 작성해야 하는지
+   - 어떤 패턴을 피해야 하는지
+   - 어떤 스타일을 추가해야 하는지
+   - 가독성을 높이기 위해 어떤 요소를 추가해야 하는지 (소제목, 리스트, 볼드체 등)
+
+다음 JSON 형식으로 응답해주세요:
+{{
+  "mechanical_patterns": ["발견된 기계적 패턴 1", "발견된 기계적 패턴 2"],
+  "readability_issues": ["가독성 문제 1 (예: 문단이 너무 길어서 읽기 어려움)", "가독성 문제 2 (예: 리스트가 부족함)"],
+  "improvement_suggestions": ["개선 제안 1", "개선 제안 2"],
+  "avoid_patterns": ["피해야 할 패턴 1", "피해야 할 패턴 2"],
+  "add_variations": ["추가해야 할 변형 1", "추가해야 할 변형 2"],
+  "readability_suggestions": ["가독성 개선 제안 1 (예: 긴 문단을 나누기)", "가독성 개선 제안 2 (예: 리스트 형식 사용)"]
+}}"""
+        
+        messages = [
+            {
+                "role": "system",
+                "content": "당신은 블로그 콘텐츠 분석 전문가입니다. 이전 포스팅들을 분석하여 기계적인 패턴을 찾고, 더 자연스럽고 인간적인 글쓰기 방향을 제안합니다. 또한 가독성(문단 길이, 소제목, 리스트, 볼드체 사용 등)도 평가하여 독자가 읽기 쉬운 글을 만드는 방법을 제안합니다."
+            },
+            {
+                "role": "user",
+                "content": analysis_prompt
+            }
+        ]
+        
+        try:
+            response = self._call_llm(messages, response_format={"type": "json_object"})
             analysis_result = json.loads(response)
             
             # 분석 결과를 요약된 지침으로 변환
             improvements = []
             if analysis_result.get("mechanical_patterns"):
                 improvements.append(f"❌ 피해야 할 패턴: {', '.join(analysis_result['mechanical_patterns'][:3])}")
+            if analysis_result.get("readability_issues"):
+                improvements.append(f"📖 가독성 문제: {', '.join(analysis_result['readability_issues'][:3])}")
             if analysis_result.get("improvement_suggestions"):
                 improvements.append(f"✅ 개선 제안: {', '.join(analysis_result['improvement_suggestions'][:3])}")
             if analysis_result.get("avoid_patterns"):
                 improvements.append(f"⚠️ 회피 패턴: {', '.join(analysis_result['avoid_patterns'][:3])}")
             if analysis_result.get("add_variations"):
                 improvements.append(f"➕ 추가 변형: {', '.join(analysis_result['add_variations'][:3])}")
+            if analysis_result.get("readability_suggestions"):
+                improvements.append(f"📚 가독성 개선: {', '.join(analysis_result['readability_suggestions'][:3])}")
             
             if improvements:
                 return "\n".join(improvements)
             else:
-                return "이전 포스팅 분석 완료. 자연스럽고 다양한 스타일로 작성해야 합니다."
+                return "캐시된 포스팅 분석 완료. 자연스럽고 다양한 스타일로 작성해야 합니다."
                 
         except Exception as e:
-            print(f"  ⚠️  [{self.name}] 이전 포스팅 분석 실패: {e}")
-            return "이전 포스팅 분석 실패. 기본 가이드라인을 따르세요."
+            print(f"  ⚠️  [{self.name}] 캐시된 포스팅 분석 실패: {e}")
+            return "캐시된 포스팅 분석 실패. 기본 가이드라인을 따르세요."
     
     def process(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
         """콘텐츠 생성"""
@@ -136,7 +296,31 @@ class ContentGenerationAgent(BaseAgent):
         ])
         
         if language == 'english':
-                prompt = f"""Write a **learning story format** blog post about "{keyword}" based on the following search results.
+                # 키워드가 한글이면 영어로 변환
+                import re
+                korean_pattern = re.compile(r'[가-힣]+')
+                if korean_pattern.search(keyword):
+                    # 한글 키워드를 영어로 변환 (예: "데이터" -> "Data")
+                    keyword_translation_map = {
+                        "데이터": "Data",
+                        "모델": "Model",
+                        "알고리즘": "Algorithm",
+                        "머신러닝": "Machine Learning",
+                        "딥러닝": "Deep Learning",
+                        "신경망": "Neural Network",
+                        "인공지능": "Artificial Intelligence",
+                        "AI": "AI"
+                    }
+                    english_keyword = keyword_translation_map.get(keyword, keyword)
+                    if english_keyword != keyword:
+                        print(f"  🔄 키워드 번역: '{keyword}' → '{english_keyword}'")
+                    keyword_for_content = english_keyword
+                else:
+                    keyword_for_content = keyword
+                
+                prompt = f"""Write a **learning story format** blog post about "{keyword_for_content}" based on the following search results.
+
+🚨🚨🚨 **CRITICAL: If the original keyword was "{keyword}" (in Korean), you MUST translate and use it as "{keyword_for_content}" (in English) in ALL content (title, body, everywhere). NEVER use the Korean keyword "{keyword}" in your English content!** 🚨🚨🚨
 
 ⚠️ **Previous Posts Analysis and Improvement (Very Important!)**:
 Based on analysis of previously written posts, you must write a more natural and human-like article.
@@ -148,7 +332,7 @@ Based on analysis of previously written posts, you must write a more natural and
 - Avoid mechanical patterns and use natural, diverse expressions
 - Address the issues mentioned above and incorporate the improvement suggestions
 
-**Important**: This post must follow the **EXACT structure below**. It's about a beginner's journey of discovering and understanding "{keyword}" step by step.
+**Important**: This post must follow the **EXACT structure below**. It's about a beginner's journey of discovering and understanding "{keyword_for_content}" step by step.
 
 Search Results:
 {search_summary}
@@ -164,13 +348,13 @@ Search Results:
 
 **Body (4 mandatory subheadings in order, blank line after each subheading)**:
 
-## What is {keyword}?
+## What is {keyword_for_content}?
 
 [Blank line]
 
 [2-3 paragraphs, blank line between each]
 
-## Features and Principles of {keyword}
+## Features and Principles of {keyword_for_content}
 
 [Blank line]
 
@@ -183,7 +367,7 @@ Search Results:
 
 [Principle explanation paragraph: 3-4 sentences]
 
-## {keyword} Technologies and Applications
+## {keyword_for_content} Technologies and Applications
 
 [Blank line]
 
@@ -210,6 +394,178 @@ Search Results:
 - [Blank line]
 - Third paragraph: Message to readers (2-3 sentences)
 
+🚨🚨🚨 **CRITICAL LANGUAGE REQUIREMENTS (MUST FOLLOW - ABSOLUTELY NO EXCEPTIONS)** 🚨🚨🚨:
+- Write **ONLY in English**. Do not use ANY other languages including Korean, Chinese, Japanese, Vietnamese, etc.
+- **If the original keyword was "{keyword}" (in Korean), you MUST use "{keyword_for_content}" (in English) instead. NEVER write "{keyword}" in your content!**
+- **If search results contain Korean text, you MUST translate it to English. NEVER copy Korean text directly.**
+- **Before submitting, check: Are there ANY Korean characters (가-힣) in your content? If yes, remove them and translate to English immediately.**
+- Write in natural, professional English.
+- All paragraphs must be separated by blank lines (\n\n).
+- All subheadings must be followed by a blank line.
+
+⚠️ **DO NOT**:
+- Write without following the exact structure above
+- Skip blank lines between paragraphs
+- Write content directly after subheadings without blank lines
+- Use Korean characters (가-힣) anywhere in the content
+- Copy Korean text from search results
+
+⚠️ **Readability Enhancement**:
+- Use **bold** for important keywords and concepts
+- Use clear subheadings and proper formatting
+- Use lists and numbered items actively
+- Break long paragraphs into shorter ones for easy reading
+
+Please respond in the following JSON format:
+{{
+  "title": "Title (🚨 MUST be written ONLY in English! If original keyword was '{keyword}' (Korean), use '{keyword_for_content}' (English) instead. NO Korean characters (가-힣) allowed! DO NOT use repetitive patterns. Create diverse, natural titles. Maximum 15 words)",
+  "content": "Content (🚨 MUST be written ONLY in English! If original keyword was '{keyword}' (Korean), use '{keyword_for_content}' (English) instead. NO Korean characters (가-힣) allowed! MUST follow the exact format structure above: Introduction, 4 Body subheadings, Conclusion, all with blank lines between paragraphs. Use **bold** for emphasis, clear subheadings, and lists for readability)",
+  "summary": "Summary (within 200 characters, in English only)",
+  "keywords": ["keyword1", "keyword2", "keyword3", "keyword4", "keyword5", "keyword6", "keyword7", "keyword8", "keyword9", "keyword10"],
+  "category": "IT/Computer"
+}}
+
+**keywords field**: Provide 5-10 related keywords for this post in an array format.
+**category field**: Use "IT/Computer" for technology-related posts."""
+                system_prompt = """You are a professional blog writer. Analyze search results and write original and useful content. 
+
+⚠️ **CRITICAL TITLE REQUIREMENT**: 
+- ⚠️ **MUST be written ONLY in English** - NO Korean, NO Chinese characters, NO other languages in the title! If Korean appears in the title, it's a critical error.
+- DO NOT use repetitive, mechanical title patterns like "Understanding {keyword_for_content}: A Beginner's Journey" or "{keyword_for_content}: What I Learned"
+- Create DIVERSE, NATURAL titles every time using different styles:
+  * Question format: "What is {keyword_for_content}? A Complete Guide for Beginners"
+  * Experience format: "My Journey with {keyword_for_content}: Challenges and Insights"
+  * Practical format: "{keyword_for_content} Explained: From Basics to Applications"
+  * Story format: "How {keyword_for_content} Changed My Perspective"
+  * Comparison format: "{keyword_for_content} vs Other Technologies: What's the Difference?"
+  * Problem-solving format: "Solving Real Problems with {keyword_for_content}"
+- Each title should be unique, engaging, and human-like - avoid robotic patterns
+- Maximum 15 words in the title
+
+🚨🚨🚨 **CRITICAL LANGUAGE RULE (MUST FOLLOW - ABSOLUTELY NO EXCEPTIONS)** 🚨🚨🚨: 
+- **Basic Principle**: English documents = **English ONLY**
+  * ✅ English: The ONLY allowed language
+  * ❌ Korean: ABSOLUTELY FORBIDDEN - NEVER use Korean characters (가-힣)
+  * ❌ Chinese characters (Hanja): ABSOLUTELY FORBIDDEN
+  * ❌ Japanese: ABSOLUTELY FORBIDDEN
+  * ❌ Vietnamese and all other foreign languages: ABSOLUTELY FORBIDDEN
+- Write **ONLY in English**. Do not use any other languages including Korean, Chinese characters (Hanja), Japanese, Vietnamese, or any other languages.
+- **If the keyword is in Korean (like "데이터"), you MUST translate it to English (like "Data") in ALL content, including title, body, and everywhere else.**
+- If search results contain non-English text (Korean, Chinese, Japanese, etc.), you MUST translate it to English. Never copy the original foreign language text.
+- **Even if search results show Korean text, you MUST write everything in English only.**
+- **Before writing, check: Does the keyword need translation? If it's Korean, translate it first.**
+- Write in a natural, friendly tone that is professional but not too formal.
+- **After writing, double-check: Are there ANY Korean characters (가-힣) in your content? If yes, remove them and translate to English.**"""
+        elif language == 'korean':
+            # 한글 모드: 먼저 영문으로 생성 후 번역
+            print(f"  🔄 [{self.name}] 한글 모드: 영문 생성 → 한글 번역 방식 사용")
+            
+            # 키워드 영어 번역 (한글 키워드를 영어로 변환)
+            import re
+            korean_pattern = re.compile(r'[가-힣]+')
+            if korean_pattern.search(keyword):
+                keyword_translation_map = {
+                    "데이터": "Data",
+                    "모델": "Model",
+                    "알고리즘": "Algorithm",
+                    "머신러닝": "Machine Learning",
+                    "딥러닝": "Deep Learning",
+                    "신경망": "Neural Network",
+                    "인공지능": "Artificial Intelligence",
+                    "AI": "AI"
+                }
+                english_keyword = keyword_translation_map.get(keyword, keyword)
+                if english_keyword != keyword:
+                    print(f"  🔄 키워드 번역: '{keyword}' → '{english_keyword}'")
+                keyword_for_content = english_keyword
+            else:
+                keyword_for_content = keyword
+            
+            # 먼저 영문으로 생성 (영문 프롬프트 재사용)
+            # 영문 프롬프트를 사용하여 생성
+            english_prompt = f"""Write a **learning story format** blog post about "{keyword_for_content}" based on the following search results.
+
+🚨🚨🚨 **CRITICAL: If the original keyword was "{keyword}" (in Korean), you MUST translate and use it as "{keyword_for_content}" (in English) in ALL content (title, body, everywhere). NEVER use the Korean keyword "{keyword}" in your English content!** 🚨🚨🚨
+
+⚠️ **Previous Posts Analysis and Improvement (Very Important!)**:
+Based on analysis of previously written posts, you must write a more natural and human-like article.
+
+{previous_posts_analysis}
+
+⚠️ **Reflect the above analysis results**:
+- Use a different title, different introduction opening, and different structure from previous posts
+- Avoid mechanical patterns and use natural, diverse expressions
+- Address the issues mentioned above and incorporate the improvement suggestions
+
+**Important**: This post must follow the **EXACT structure below**. It's about a beginner's journey of discovering and understanding "{keyword_for_content}" step by step.
+
+⚠️ **Very Important: Write from an AI Perspective**:
+- This keyword is part of an AI (Artificial Intelligence) learning curriculum.
+- You must clearly address the **connection to AI**.
+- Don't write about general "{keyword_for_content}" content, but about **"{keyword_for_content} in AI"** or **"{keyword_for_content} from an AI perspective"**.
+- Example: "Data" → "Data used in AI", "The relationship between Machine Learning and Data", "Data for AI learning", etc.
+- AI와의 연결고리를 자연스럽게 녹여내되, 내용 전체가 AI 맥락에서 이해되도록 작성하세요.
+
+Search Results:
+{search_summary}
+
+⚠️ **MANDATORY FORMAT STRUCTURE** (Must follow exactly):
+
+**Introduction (2-3 paragraphs, blank line between each paragraph)**:
+- First paragraph: Topic introduction from AI perspective (3-4 sentences)
+- [Blank line]
+- Second paragraph: Personal motivation or experience with AI (2-3 sentences)
+- [Blank line]
+- Third paragraph: What readers will learn about AI and {keyword_for_content} (2-3 sentences)
+
+**Body (3-4 mandatory subheadings, blank line after each subheading)**:
+
+## What is {keyword_for_content}? (in AI context)
+
+[Blank line]
+
+[2-3 paragraphs about {keyword_for_content} in AI context, blank line between each]
+
+## Features and Principles of {keyword_for_content} in AI
+
+[Blank line]
+
+**Key Features** (MUST use markdown list format: 1. 2. 3.):
+1. First feature related to AI: [2-3 sentences]
+2. Second feature related to AI: [2-3 sentences]
+3. Third feature related to AI: [2-3 sentences]
+
+[Blank line]
+
+[Principle explanation paragraph about AI and {keyword_for_content}: 3-4 sentences]
+
+## {keyword_for_content} Technologies and Applications in AI
+
+[Blank line]
+
+**Key Technologies** (MUST use markdown list):
+1. Technology 1 in AI: [2-3 sentences]
+2. Technology 2 in AI: [2-3 sentences]
+
+[Blank line]
+
+**Applications** (MUST use markdown list):
+1. **Industry/Field 1**: [2-3 sentences]
+2. **Industry/Field 2**: [2-3 sentences]
+
+## My Experience and Thoughts (about AI and {keyword_for_content})
+
+[Blank line]
+
+[2-3 paragraphs about personal experience with AI and {keyword_for_content}, blank line between each]
+
+**Conclusion (2-3 paragraphs, blank line between each)**:
+- First paragraph: Key summary about AI and {keyword_for_content} (3-4 sentences)
+- [Blank line]
+- Second paragraph: Personal reflection on learning AI (2-3 sentences)
+- [Blank line]
+- Third paragraph: Message to readers about AI learning (2-3 sentences)
+
 ⚠️ **Language Requirements**:
 - Write **only in English**. Do not use any other languages.
 - Write in natural, professional English.
@@ -227,38 +583,187 @@ Search Results:
 - Use lists and numbered items actively
 - Break long paragraphs into shorter ones for easy reading
 
-⚠️ **Language Requirement**:
-- Write **ONLY in English**. Do not use Korean or any other languages.
-
 Please respond in the following JSON format:
 {{
-  "title": "Title (⚠️ DO NOT use repetitive patterns like 'Understanding {keyword}: A Beginner's Journey' every time. Create diverse, natural titles: question format, experience sharing, practical guide, story format, explanation format, comparison format, etc. Make each title unique and engaging)",
-  "content": "Content (⚠️ MUST follow the exact format structure above: Introduction, 4 Body subheadings, Conclusion, all with blank lines between paragraphs. Use **bold** for emphasis, clear subheadings, and lists for readability)",
+  "title": "Title (⚠️ MUST be written ONLY in English! DO NOT use repetitive patterns like 'Understanding {keyword_for_content}: A Beginner's Journey' every time. Create diverse, natural titles from AI perspective: question format, experience sharing, practical guide, story format, explanation format, comparison format, etc. Make each title unique and engaging. Maximum 15 words)",
+  "content": "Content (⚠️ MUST follow the exact format structure above: Introduction, 3-4 Body subheadings about AI, Conclusion, all with blank lines between paragraphs. Use **bold** for emphasis, clear subheadings, and lists for readability)",
   "summary": "Summary (within 200 characters, in English only)",
   "keywords": ["keyword1", "keyword2", "keyword3", "keyword4", "keyword5", "keyword6", "keyword7", "keyword8", "keyword9", "keyword10"],
   "category": "IT/Computer"
-}}
+}}"""
+            
+            english_system_prompt = """You are a professional blog writer. Analyze search results and write original and useful content from an AI perspective.
 
-**keywords field**: Provide 5-10 related keywords for this post in an array format.
-**category field**: Use "IT/Computer" for technology-related posts."""
-                system_prompt = """You are a professional blog writer. Analyze search results and write original and useful content. 
+⚠️ **CRITICAL LANGUAGE RULE**: 
+- Write **ONLY in English**. Do not use Korean or any other languages.
+- Write in a natural, friendly tone that is professional but not too formal.
+- All content must be written from an AI perspective, connecting the keyword to artificial intelligence."""
+            
+            # 영문으로 먼저 생성
+            english_messages = [
+                {"role": "system", "content": english_system_prompt},
+                {"role": "user", "content": english_prompt}
+            ]
+            
+            try:
+                print(f"  📝 [{self.name}] 1단계: 영문 콘텐츠 생성 중...")
+                english_response = self._call_llm(
+                    english_messages,
+                    response_format={"type": "json_object"}
+                )
+                
+                english_content = json.loads(english_response)
+                english_title = english_content.get("title", "")
+                english_content_text = english_content.get("content", "")
+                english_summary = english_content.get("summary", "")
+                english_keywords = english_content.get("keywords", [])
+                english_category = english_content.get("category", "IT/컴퓨터")
+                
+                print(f"  ✅ [{self.name}] 영문 생성 완료: {english_title[:50]}")
+                
+                # 2단계: 한글로 번역
+                print(f"  🔄 [{self.name}] 2단계: 한글로 번역 중...")
+                
+                translation_prompt = f"""다음은 영문 블로그 포스트입니다. 이것을 **자연스러운 한국어**로 번역해주세요.
 
-⚠️ **CRITICAL TITLE REQUIREMENT**: 
-- DO NOT use repetitive, mechanical title patterns like "Understanding {keyword}: A Beginner's Journey" or "{keyword}: What I Learned"
-- Create DIVERSE, NATURAL titles every time using different styles:
-  * Question format: "What is {keyword}? A Complete Guide for Beginners"
-  * Experience format: "My Journey with {keyword}: Challenges and Insights"
-  * Practical format: "{keyword} Explained: From Basics to Applications"
-  * Story format: "How {keyword} Changed My Perspective"
-  * Comparison format: "{keyword} vs Other Technologies: What's the Difference?"
-  * Problem-solving format: "Solving Real Problems with {keyword}"
-- Each title should be unique, engaging, and human-like - avoid robotic patterns
+🚨🚨🚨 **절대적 명령: 반드시 형식을 유지해야 합니다!** 🚨🚨🚨
 
-⚠️ Write **only in English**. Do not use any other languages including Chinese characters (Hanja) or Korean. Write in a natural, friendly tone that is professional but not too formal."""
-        else:
-            # 학습 스토리 형식 여부에 따라 프롬프트 분기
-            if learning_story:
-                prompt = f"""다음 검색 결과를 기반으로 "{keyword}"에 대한 **AI 관련 학습 스토리 형식**의 블로그 포스트를 작성해주세요.
+⚠️ **번역 규칙 (매우 중요 - 절대 위반 불가)**:
+
+1. **제목 번역**:
+   - 제목을 자연스러운 한국어로 번역하되, 15자 이내로 작성
+   - AI 관점을 반영한 자연스러운 제목으로 번역
+   - 예: "Uncovering Data" → "AI에서 데이터 이해하기"
+
+2. **본문 번역 - 구조 필수**:
+   ⚠️ **절대 형식 없이 통으로 작성하면 안 됩니다!**
+   
+   반드시 다음 구조를 따라야 합니다:
+   
+   ## 서론 (Introduction)
+   [빈 줄 필수]
+   [문단 1: 3-4문장]
+   [빈 줄 필수]
+   [문단 2: 2-3문장]
+   [빈 줄 필수]
+   [문단 3: 2-3문장]
+   [빈 줄 필수]
+   
+   ## 본론 소제목 1 (예: 데이터란 무엇인가?)
+   [빈 줄 필수]
+   [본문 문단들, 각 문단 사이 빈 줄 필수]
+   [빈 줄 필수]
+   
+   ## 본론 소제목 2
+   [빈 줄 필수]
+   [본문 문단들, 각 문단 사이 빈 줄 필수]
+   [빈 줄 필수]
+   
+   ## 본론 소제목 3
+   [빈 줄 필수]
+   [본문 문단들, 각 문단 사이 빈 줄 필수]
+   [빈 줄 필수]
+   
+   ## 결론
+   [빈 줄 필수]
+   [결론 문단들, 각 문단 사이 빈 줄 필수]
+
+3. **형식 유지 규칙**:
+   - ⚠️ **절대 형식 없이 통으로 작성하면 안 됩니다!**
+   - 마크다운 형식(##, **, 1., 2. 등)은 그대로 유지
+   - 문단 사이 반드시 빈 줄(\n\n) 유지
+   - 소제목(##) 다음 반드시 빈 줄 하나 유지
+   - 소제목도 자연스러운 한국어로 번역 (예: "## What is Data?" → "## 데이터란 무엇인가?")
+   - 각 문단은 2-4문장으로 구성
+   - 리스트 형식은 그대로 유지 (1., 2., 3. 또는 -, -)
+
+4. **언어 규칙**:
+   - 한국어 + 필요시 영어 기술 용어만 사용
+   - 기술 용어는 괄호로 영어 원문 포함 (예: "AI(인공지능)")
+   - 자연스러운 한국어 표현 사용
+   - 존댓말(~요, ~네요)과 평어(~다, ~이다)를 자연스럽게 혼합
+   - 절대 한자, 일본어, 중국어 등 다른 언어 사용 금지
+
+5. **구조 유지 (매우 중요)**:
+   - ⚠️ 반드시 서론-본론(3-4개 소제목)-결론 구조 유지
+   - ⚠️ 형식 없이 통으로 작성하면 절대 안 됩니다!
+   - 소제목은 반드시 ## 형식으로 작성
+   - 소제목과 본문 사이, 문단과 문단 사이 반드시 빈 줄 유지
+
+6. **AI 관점 유지**:
+   - 원문의 AI 관점을 그대로 반영
+   - AI와의 연결고리를 자연스럽게 유지
+
+영문 제목:
+{english_title}
+
+영문 본문:
+{english_content_text}
+
+⚠️ **중요**: 번역 시 형식을 절대 잃어버리면 안 됩니다! 서론-본론-결론 구조와 모든 빈 줄을 그대로 유지해야 합니다.
+
+다음 JSON 형식으로 응답해주세요:
+{{
+  "title": "번역된 한글 제목 (15자 이내, 자연스러운 한국어, AI 관점 반영)",
+  "content": "번역된 한글 본문 (⚠️ 반드시 서론-본론(3-4개 소제목)-결론 구조 유지, 각 문단 사이 빈 줄 필수, 마크다운 형식 유지, 형식 없이 통으로 작성하면 절대 안 됩니다!)",
+  "summary": "번역된 한글 요약 (200자 이내)",
+  "keywords": {json.dumps([kw for kw in english_keywords], ensure_ascii=False)},
+  "category": "IT/컴퓨터"
+}}"""
+                
+                translation_system_prompt = """당신은 전문 번역가입니다. 영문 블로그 포스트를 자연스러운 한국어로 번역합니다. 
+
+⚠️ 매우 중요:
+- 마크다운 형식과 구조를 정확히 유지해야 합니다
+- 절대 형식 없이 통으로 작성하면 안 됩니다
+- 반드시 서론-본론(3-4개 소제목)-결론 구조를 유지해야 합니다
+- 모든 문단 사이, 소제목과 본문 사이 빈 줄을 유지해야 합니다
+- AI 관점을 반영하여 번역합니다"""
+                
+                translation_messages = [
+                    {"role": "system", "content": translation_system_prompt},
+                    {"role": "user", "content": translation_prompt}
+                ]
+                
+                translation_response = self._call_llm(
+                    translation_messages,
+                    response_format={"type": "json_object"}
+                )
+                
+                translated_content = json.loads(translation_response)
+                title = translated_content.get("title", "")
+                content_text = translated_content.get("content", "")
+                summary = translated_content.get("summary", english_summary)
+                keywords = translated_content.get("keywords", english_keywords)
+                category = translated_content.get("category", english_category)
+                
+                print(f"  ✅ [{self.name}] 한글 번역 완료: {title[:50]}")
+                
+                # 번역된 콘텐츠 사용 - 바로 검증 단계로 이동 (아래 코드 스킵)
+                # title, content_text, summary, keywords, category가 이미 설정됨
+                translation_success = True
+                
+            except Exception as e:
+                print(f"  ❌ [{self.name}] 영문→한글 번역 실패: {e}")
+                import traceback
+                traceback.print_exc()
+                # 번역 실패 시 에러 반환 (fallback 제거)
+                return {
+                    "status": "failed",
+                    "message": f"영문→한글 번역 실패: {str(e)}",
+                    "error": str(e)
+                }
+                prompt = f"""⚠️ **매우 중요: 반드시 한글로만 작성해야 합니다!** 영어로 작성하면 안 됩니다!
+
+⚠️ **언어 작성 규칙 (절대 위반 불가)**:
+- 제목: 반드시 한글로만 작성 (예: "AI에서 데이터 이해하기")
+- 본문: 반드시 한글로만 작성
+- 소제목: 반드시 한글로만 작성 (예: "## 데이터란 무엇인가?")
+- 영어는 기술 용어나 고유명사 설명 시에만 사용 가능 (예: "AI(인공지능)", "OpenAI")
+- 절대로 영어로 작성하면 안 됩니다!
+- 검색 결과가 영어여도 반드시 한글로 번역해서 작성하세요!
+
+다음 검색 결과를 기반으로 "{keyword}"에 대한 **AI 관련 학습 스토리 형식**의 블로그 포스트를 **반드시 한글로만** 작성해주세요.
 
 ⚠️ **이전 포스팅 분석 및 개선 (매우 중요!)**:
 이전에 작성된 포스팅들을 분석한 결과를 바탕으로, 더 자연스럽고 인간적인 글을 작성해야 합니다.
@@ -269,6 +774,7 @@ Please respond in the following JSON format:
 - 이전 포스팅과 다른 제목, 다른 서론 시작 문구, 다른 구조를 사용하세요
 - 기계적인 패턴을 피하고, 자연스럽고 다양한 표현을 사용하세요
 - 위에서 지적된 문제점들을 해결하고, 개선 제안을 반영하세요
+- 📖 **가독성 개선 제안을 반드시 반영하세요**: 문단 길이 조절, 소제목 활용, 리스트 및 볼드체 사용 등
 
 ⚠️ **매우 중요: AI 관련 키워드**:
 - 이 키워드는 AI(인공지능) 학습 커리큘럼의 일부입니다.
@@ -282,15 +788,29 @@ Please respond in the following JSON format:
 검색 결과:
 {search_summary}
 
-⚠️ **언어 작성 규칙 (엄격히 준수)**:
-- **한글 위주로 작성**: 본문은 한글로 작성합니다.
-- **한자 절대 사용 금지**: 한자는 전혀 사용하지 마세요. (예: 非常 ❌ → 매우 ✅)
-- **일본어, 베트남어 등 외국어 문자 절대 사용 금지**: まだ, khá 같은 외국어 문자 사용 금지
-- **영어 사용**: 다음 경우에만 영어 사용 가능
-  * 기술 용어나 축약어를 설명할 때: 예) "AI(인공지능)", "API", "GPU"
-  * 영어 원문을 그대로 사용하는 것이 더 이해하기 쉬울 때: 예) "Machine Learning(머신러닝)"
-  * 축약어나 고유명사를 사용할 때: 예) "OpenAI", "Python"
-- **설명 필요시**: 영어 사용 시 괄호 안에 한글 설명을 함께 제공하세요.
+⚠️ **언어 작성 규칙 (무조건 준수 - 절대 위반 불가)**:
+- **🚨 핵심 원칙**: **한글이 주가 되어야 합니다!** 영어는 필요시에만 최소한으로 사용!
+  * ✅ **한국어가 주**: 전체 내용의 80% 이상은 한글이어야 함
+  * ✅ **영어는 보조**: 기술 용어나 축약어 설명 시에만 사용 가능 (예: "AI(인공지능)", "API")
+  * ❌ **절대 금지**: 영어 문장이나 영어가 주가 되는 내용
+  * ❌ 일본어 절대 금지: データ, まだ, あり 등 → 한국어로 번역
+  * ❌ 중국어(한자) 절대 금지: 非常, 数据 등 → 한국어로 번역
+  * ❌ 베트남어 등 기타 모든 외국어 절대 금지
+- **영어 사용 규칙 (최소한만!)**:
+  * 기술 용어나 축약어 설명: "AI(인공지능)", "API", "GPU"
+  * 영어 원문이 이해에 도움: "Machine Learning(머신러닝)"
+  * 고유명사: "OpenAI", "Python"
+  * ❌ **금지**: 영어 문장, 영어로 된 설명, 영어가 많은 문단
+- **⚠️ 매우 중요**: 
+  * 한글이 주가 되어야 합니다 (한글 비율 80% 이상)
+  * 영어는 기술 용어 설명 시에만 괄호 안에 최소한으로 사용
+  * 검색 결과가 영어여도 반드시 한글로 번역해서 작성
+  * 일본어, 중국어 등 모든 외국어는 한국어로 번역
+- **검색 결과 처리**: 검색 결과에 일본어(データ 등), 중국어, 베트남어가 있어도 **절대 그대로 사용하지 말고**, 반드시 한국어로 번역해서 사용하세요.
+  - 예: データ ❌ → 데이터 ✅
+  - 예: まだ ❌ → 아직 ✅
+  - 예: 非常 ❌ → 매우 ✅
+- **한자 절대 금지**: 모든 한자를 한국어로 번역하세요.
 
 **블로그 글 작성 형식 (실제 블로그들의 베스트 프랙티스 학습 결과 반영)**:
 
@@ -571,7 +1091,7 @@ Please respond in the following JSON format:
 다음 JSON 형식으로 응답해주세요:
 {{
   "title": "제목 (⚠️ 반드시 15자 이내, 완벽한 한 문장으로 끝나야 함! 절대 '{keyword}, 처음에는 몰랐지만 이제 이해하게 된 이야기' 같은 고정 패턴 사용 금지! 매번 다른 스타일의 자연스러운 제목 생성: 질문형, 경험담형, 실용형, 스토리형, 설명형 등 다양하게)",
-  "content": "본문 내용 (⚠️ 반드시 AI 관점에서 작성! 이 키워드는 AI 학습 커리큘럼의 일부이므로 AI와의 연관성을 명확히 다뤄야 함. 구조는 참고용이며, 내용에 따라 다양하게 작성 가능. 서론 2-3문단(각 문단 사이 빈 줄, 시작 문구는 절대 고정 패턴 사용 금지!), 본론은 AI 관점에서 {keyword}에 대해 다루되 소제목은 내용에 맞게 다양하게 작성 가능, 결론 2-3문단(각 문단 사이 빈 줄). 모든 문단 사이 반드시 빈 줄 필수. 마크다운 형식, 리스트 필수 사용)",
+  "content": "본문 내용 (⚠️ 🚨 한글이 주가 되어야 합니다! 한글 비율 80% 이상! 영어는 기술 용어 설명 시에만 최소한으로 사용! 영어 문장이나 영어가 많은 내용은 절대 안 됩니다! ⚠️ 반드시 AI 관점에서 작성! 이 키워드는 AI 학습 커리큘럼의 일부이므로 AI와의 연관성을 명확히 다뤄야 함. ⚠️ 기본 구조는 필수입니다: 1) 서론: 2-3문단(각 문단 사이 빈 줄 필수, 시작 문구는 절대 고정 패턴 사용 금지! 다양한 시작 문구 사용), 2) 본론: 반드시 3-4개 소제목 포함(## 소제목 형식, 각 소제목 아래 빈 줄 필수, 본문 2-4문단, 각 문단 사이 빈 줄 필수, 소제목 표현은 다양하게 변경 가능하지만 구조는 유지), 3) 결론: 2-3문단(각 문단 사이 빈 줄 필수). 모든 문단 사이 반드시 빈 줄 필수. 마크다운 형식, 리스트 필수 사용. 형식 없이 작성하면 절대 안 됩니다!)",
   "summary": "요약 (200자 이내, 한글 위주)",
   "keywords": ["키워드1", "키워드2", "키워드3", "키워드4", "키워드5", "키워드6", "키워드7", "키워드8", "키워드9", "키워드10"],
   "category": "티스토리 카테고리 (예: IT/컴퓨터, 취미/생활, 경제/경영, 시사/이슈, 교육/강의, 예술/문화 등)"
@@ -581,6 +1101,11 @@ Please respond in the following JSON format:
 **category 필드**: 티스토리 기준으로 이 포스트가 속할 카테고리를 한 개만 선택해주세요. (예: IT/컴퓨터, 취미/생활, 경제/경영, 시사/이슈, 교육/강의, 예술/문화 등)"""
                 system_prompt = """당신은 김AI(30대 남성, IT 중소기업 직장인, MBTI: ISFJ)입니다.
 AI(인공지능) 학습 커리큘럼을 하나씩 차근차근 학습해나가는 스토리 형식으로 글을 작성합니다.
+
+⚠️ **매우 중요: 반드시 한글로만 작성해야 합니다!**
+- 제목, 본문, 요약 모두 반드시 한글로만 작성
+- 영어는 기술 용어 설명 시에만 사용 가능 (예: "AI(인공지능)")
+- 영어로 작성하면 절대 안 됩니다!
 
 ⚠️ **매우 중요: AI 관점에서 작성**:
 - 모든 키워드는 AI 학습 커리큘럼의 일부입니다.
@@ -637,10 +1162,18 @@ AI(인공지능) 학습 커리큘럼을 하나씩 차근차근 학습해나가�
 - 개인적인 경험과 느낌을 솔직하게 공유
 - "처음에는 ~라고 생각했는데", "실제로 해보니 ~", "개인적으로는 ~" 같은 표현 자연스럽게 사용 (말투는 평어와 존댓말 혼합)
 
-⚠️ **절대적으로 반드시 준수할 언어 규칙**:
-- 반드시 한글로만 작성하세요. 영어로 작성하면 안 됩니다.
-- 제목: 한글로만 작성
-- 본문: 한글로만 작성
+⚠️ **절대적으로 반드시 준수할 언어 규칙 (무조건 지켜야 함)**:
+- **기본 원칙**: 한국 문서 = **한국어 + 필요시 영어만** 허용
+  * ✅ 한국어: 기본 언어
+  * ✅ 영어: 기술 용어나 축약어 설명 시에만 사용 가능
+  * ❌ 일본어, 중국어(한자), 베트남어 등 모든 외국어 절대 금지
+- ⚠️ **제목**: 한국어로 작성 (필요시 영어 기술 용어만 추가 가능, 일본어/중국어 절대 금지)
+- ⚠️ **본문**: 한국어로 작성 (필요시 영어 기술 용어만 추가 가능, 일본어/중국어 절대 금지)
+- **절대 금지**: 일본어(データ, まだ), 중국어(한자), 베트남어(khá) 등 모든 외국어 문자
+- ⚠️ **중요**: 검색 결과에 외국어(일본어, 중국어 등)가 있어도, **절대 그대로 사용하지 말고** 반드시 한국어로 번역하세요.
+  - データ → 데이터
+  - まだ → 아직
+  - 非常 → 매우
 - 영어는 기술 용어 설명 시에만 사용 (예: "AI(인공지능)")
 
 ⚠️ **글 구조 형식 (AI 관점에서 유연하게 작성)**:
@@ -652,25 +1185,32 @@ AI(인공지능) 학습 커리큘럼을 하나씩 차근차근 학습해나가�
 - 예: "데이터" → "AI에서 사용되는 데이터", "머신러닝과 데이터의 관계", "AI 학습을 위한 데이터" 등
 - AI와의 연결고리를 자연스럽게 녹여내되, 내용 전체가 AI 맥락에서 이해되도록 작성하세요.
 
-⚠️ **구조는 가이드라인입니다 - 항상 똑같이 작성할 필요 없음**:
-- 서론/본론/결론 형식은 기본이지만, 내용에 따라 구조를 다양하게 가져가도 됩니다.
-- 소제목도 내용에 맞게 다양하게 변경 가능합니다.
-- 포스팅마다 다른 접근 방식으로 작성하여 기계적인 느낌을 피하세요.
+⚠️ **기본 구조는 반드시 유지해야 합니다**:
+- 서론/본론/결론 형식은 **필수**입니다. 이 구조는 항상 따라야 합니다.
+- 다만 **내용과 표현**은 다양하게 작성하세요:
+  * 서론 시작 문구는 매번 다르게
+  * 본론 소제목 표현은 다양하게 (예: "{keyword}란?", "AI에서 {keyword}", "{keyword}의 역할" 등)
+  * 결론도 매번 다른 표현으로
+- **구조 없이** 작성하면 안 됩니다. 기본 형식은 반드시 유지하되, 그 안의 내용만 다양하게!
 
-**기본 구조 (참고용, 내용에 맞게 조정 가능)**:
+**기본 구조 (반드시 유지, 표현만 다양하게)**:
 
-1. **서론 (Introduction)** - 2-3개 문단, 각 문단 사이 빈 줄 필수, AI 관점에서
+⚠️ **중요**: 다음 구조는 **필수**입니다. 형식 없이 작성하면 안 됩니다!
+
+1. **서론 (Introduction)** - **반드시 2-3개 문단**, 각 문단 사이 빈 줄 필수, AI 관점에서
    - 첫 문단: 주제 도입 (3-4문장) - ⚠️ **절대 고정 패턴 사용 금지!** AI 관점에서 {keyword}를 어떻게 소개할지 다양하게
    - [빈 줄]
    - 두 번째 문단: 동기 또는 AI와의 첫 만남 (2-3문장) - ⚠️ **매번 다른 표현으로!** AI 학습 관점에서의 계기나 배경
    - [빈 줄]
    - 세 번째 문단: 독자 안내 (2-3문장) - ⚠️ **다양하게!** AI 학습 관점에서 무엇을 배울지 안내
 
-2. **본론 (Body)** - AI 관점에서 {keyword}에 대해 다룸, 소제목은 내용에 맞게 다양하게 작성
-   - ⚠️ 다음 소제목들은 **참고일 뿐**입니다. 내용에 따라 순서, 표현, 구조를 다르게 할 수 있습니다.
-   - 포스팅마다 다른 구조로 작성하여 자연스러움을 유지하세요.
+2. **본론 (Body)** - AI 관점에서 {keyword}에 대해 다룸, **반드시 3-4개 소제목 포함**
+   - ⚠️ **본론 구조는 필수입니다**: 반드시 3-4개의 소제목 섹션을 포함해야 합니다
+   - 소제목 **표현**은 다양하게 변경 가능하지만, 소제목 **개수와 구조**는 유지해야 합니다
+   - 소제목이 없거나 1-2개만 있으면 안 됩니다!
+   - ⚠️ **소제목은 간결하게 작성** (예: "## {keyword}란 무엇인가?", "## AI에서 {keyword}의 역할" 등)
    
-   **예시 소제목 옵션** (매번 다르게 선택/변형 가능):
+   **소제목 예시** (표현은 다양하게, 하지만 3-4개 구조는 유지, 간결하게):
    - ## {keyword}란 무엇인가? (AI 관점에서)
    - ## AI에서 {keyword}의 역할
    - ## {keyword}와 인공지능의 관계
@@ -772,14 +1312,18 @@ AI(인공지능) 학습 커리큘럼을 하나씩 차근차근 학습해나가�
 검색 결과:
 {search_summary}
 
-⚠️ **언어 작성 규칙**:
-- **한글 위주로 작성**: 본문은 한글로 작성합니다.
-- **한자 절대 사용 금지**: 한자는 전혀 사용하지 마세요.
+⚠️ **언어 작성 규칙 (무조건 준수 - 절대 위반 불가)**:
+- **기본 원칙**: 한국 문서 = **한국어 + 필요시 영어만**
+  * ✅ 한국어: 기본 언어
+  * ✅ 영어: 기술 용어나 축약어 설명 시에만 사용 가능 (예: "AI(인공지능)", "API")
+  * ❌ 일본어 절대 금지: データ, まだ 등 → 한국어로 번역
+  * ❌ 중국어(한자) 절대 금지: 非常, 数据 등 → 한국어로 번역
+  * ❌ 베트남어 등 기타 모든 외국어 절대 금지
+- **검색 결과 처리**: 검색 결과에 일본어, 중국어, 베트남어가 있어도 **절대 그대로 사용하지 말고**, 반드시 한국어로 번역하세요.
 - **영어 사용**: 다음 경우에만 영어 사용 가능
-  * 기술 용어나 축약어를 설명할 때: 예) "AI(인공지능)", "API", "GPU"
-  * 영어 원문을 그대로 사용하는 것이 더 이해하기 쉬울 때: 예) "Machine Learning(머신러닝)"
-  * 축약어나 고유명사를 사용할 때: 예) "OpenAI", "Python"
-- **설명 필요시**: 영어 사용 시 괄호 안에 한글 설명을 함께 제공하세요.
+  * 기술 용어나 축약어: "AI(인공지능)", "API", "GPU"
+  * 영어 원문이 이해에 도움: "Machine Learning(머신러닝)"
+  * 고유명사: "OpenAI", "Python"
 
 요구사항:
 1. 제목: 매력적이고 SEO 친화적인 제목 (한글 위주, 필요시 영어)
@@ -855,7 +1399,7 @@ MBTI는 ISFJ로, 조용하고 배려심이 많으며, 실용적이고 세심한 
         ]
         
         try:
-            response = self._call_groq(
+            response = self._call_llm(
                 messages,
                 response_format={"type": "json_object"}
             )
@@ -868,248 +1412,73 @@ MBTI는 ISFJ로, 조용하고 배려심이 많으며, 실용적이고 세심한 
             keywords = generated_content.get("keywords", [])
             category = generated_content.get("category", "")  # 티스토리 카테고리
             
-            # 언어 검증 (한글 모드일 때)
-            if language == 'korean':
-                # 한글 비율 확인
+            # 영문 모드일 때: 생성된 콘텐츠에서 한글 자동 제거
+            if language == 'english':
                 import re
-                korean_chars = len(re.findall(r'[가-힣]', title + content_text))
-                total_chars = len(re.sub(r'[^\w\s가-힣]', '', title + content_text))
-                korean_ratio = korean_chars / total_chars if total_chars > 0 else 0
+                korean_pattern = re.compile(r'[가-힣]')
                 
-                if korean_ratio < 0.3:  # 한글 비율이 30% 미만이면
-                    print(f"  ⚠️  [{self.name}] 언어 검증 실패: 한글 비율 {korean_ratio*100:.1f}% (최소 30% 필요)")
-                    print(f"  🔄 [{self.name}] 한글로 재생성 시도...")
-                    
-                    # 한글 강제 재생성
-                    retry_prompt = f"""{prompt}
-
-🚨 **중요**: 이전 응답이 영어로 작성되었습니다. 반드시 한글로 다시 작성해주세요.
-
-⚠️ **언어 규칙 (절대 필수)**:
-- 제목: 반드시 한글로 작성
-- 본문: 반드시 한글로 작성
-- 영어는 기술 용어나 고유명사 설명 시에만 사용 (예: "AI(인공지능)", "OpenAI")
-- 모든 설명과 문장은 한글로 작성
-
-다시 한글로 작성해주세요."""
-                    
-                    try:
-                        retry_messages = [
-                            {"role": "system", "content": system_prompt},
-                            {"role": "user", "content": retry_prompt}
-                        ]
-                        
-                        retry_response = self._call_groq(
-                            retry_messages,
-                            response_format={"type": "json_object"}
-                        )
-                        
-                        retry_content = json.loads(retry_response)
-                        title = retry_content.get("title", title)
-                        content_text = retry_content.get("content", content_text)
-                        
-                        # 재검증
-                        korean_chars = len(re.findall(r'[가-힣]', title + content_text))
-                        total_chars = len(re.sub(r'[^\w\s가-힣]', '', title + content_text))
-                        korean_ratio = korean_chars / total_chars if total_chars > 0 else 0
-                        
-                        if korean_ratio >= 0.3:
-                            print(f"  ✅ [{self.name}] 한글 재생성 성공 (한글 비율: {korean_ratio*100:.1f}%)")
+                # 제목에서 한글 제거
+                title_korean_count = len(korean_pattern.findall(title))
+                if title_korean_count > 0:
+                    print(f"  ⚠️  제목에서 한글 {title_korean_count}개 발견, 제거 시도...")
+                    # 한글 부분을 영어로 번역하거나 제거
+                    # 일단 제목의 한글 부분을 제거 (간단한 방법)
+                    title = korean_pattern.sub('', title).strip()
+                    # 공백 정리
+                    title = re.sub(r'\s+', ' ', title)
+                
+                # 본문에서 한글 제거
+                content_korean_count = len(korean_pattern.findall(content_text))
+                if content_korean_count > 0:
+                    print(f"  ⚠️  본문에서 한글 {content_korean_count}개 발견, 제거 시도...")
+                    # 한글 문장 또는 단어를 찾아서 제거
+                    # 한글이 포함된 문장 제거
+                    lines = content_text.split('\n')
+                    cleaned_lines = []
+                    for line in lines:
+                        # 한글이 포함된 줄이면 제거
+                        if not korean_pattern.search(line):
+                            cleaned_lines.append(line)
                         else:
-                            print(f"  ⚠️  [{self.name}] 한글 재생성 실패, 원본 사용")
-                    except Exception as e:
-                        print(f"  ⚠️  [{self.name}] 한글 재생성 오류: {e}")
-            
-            # 형식 검증 (학습 스토리 형식일 때만)
-            if language == 'korean' and learning_story:
-                format_issues = []
-                
-                # 1. 서론 검증 (2-3개 문단, 각 문단 사이 빈 줄)
-                # 첫 번째 소제목 전까지가 서론
-                first_heading_pos = content_text.find("##")
-                if first_heading_pos > 0:
-                    intro_section = content_text[:first_heading_pos]
-                else:
-                    intro_section = content_text.split("\n\n", 3)[0] if "\n\n" in content_text else ""
-                
-                intro_paragraphs = [p.strip() for p in intro_section.split("\n\n") if p.strip() and not p.strip().startswith("#") and len(p.strip()) > 50]
-                if len(intro_paragraphs) < 2:
-                    format_issues.append(f"서론은 최소 2개 문단이 필요합니다. 현재 {len(intro_paragraphs)}개입니다.")
-                
-                # 2. 본론 소제목 검증 (4개 필수)
-                required_headings_kr = [
-                    f"{keyword}란 무엇인가?",
-                    f"{keyword}의 특징과 원리",
-                    f"{keyword} 기술과 활용 사례",
-                    "나의 경험/느낀 점"
-                ]
-                for heading in required_headings_kr:
-                    if heading not in content_text:
-                        format_issues.append(f"필수 소제목 '{heading}'이 없습니다.")
-                
-                # 3. 결론 검증
-                if "결론" not in content_text and "마지막" not in content_text[-300:]:
-                    format_issues.append("결론 섹션이 없거나 명확하지 않습니다.")
-                
-                # 4. 빈 줄 검증 - 소제목 다음
-                lines = content_text.split("\n")
-                for i, line in enumerate(lines):
-                    if line.strip().startswith("##") and i + 1 < len(lines):
-                        next_line = lines[i+1].strip()
-                        if next_line != "" and not next_line.startswith("#"):
-                            format_issues.append(f"소제목 '{line.strip()[:50]}...' 다음에 빈 줄이 필요합니다.")
-                
-                # 5. 문단 구분 확인
-                double_newlines = content_text.count("\n\n")
-                if double_newlines < 5:
-                    format_issues.append(f"문단 사이 빈 줄이 부족합니다. (현재: {double_newlines}개, 최소 5개 필요)")
-                
-                if format_issues:
-                    print(f"  ⚠️  [{self.name}] 형식 검증 실패:")
-                    for issue in format_issues:
-                        print(f"     - {issue}")
-                    print(f"  🔄 [{self.name}] 형식을 맞춰 재생성 시도...")
+                            # 한글 부분만 제거하고 나머지 유지
+                            cleaned_line = korean_pattern.sub('', line).strip()
+                            if cleaned_line:  # 내용이 남아있으면 추가
+                                cleaned_lines.append(cleaned_line)
+                    content_text = '\n'.join(cleaned_lines)
+                    # 연속된 빈 줄 정리
+                    content_text = re.sub(r'\n{3,}', '\n\n', content_text)
                     
-                    # 형식 문제가 있으면 재생성 시도 (최대 1회)
-                    format_prompt = f"""{prompt}
-
-🚨 **형식 검증 실패**: 생성된 콘텐츠가 요구된 형식을 따르지 않았습니다.
-
-발견된 문제:
-{chr(10).join(f"- {issue}" for issue in format_issues)}
-
-⚠️ **반드시 다음 형식을 정확히 준수하여 다시 작성해주세요**:
-
-⚠️ **매우 중요: AI 관점에서 작성 필수!**
-- 이 키워드는 AI(인공지능) 학습 커리큘럼의 일부입니다.
-- 반드시 **AI와의 연관성**을 명확히 다뤄야 합니다.
-- 단순히 일반적인 내용이 아니라, **"AI에서의 {keyword}"** 또는 **"AI 관점에서 본 {keyword}"**로 작성해야 합니다.
-
-1. **서론**: 반드시 2-3개 문단, 각 문단 사이 빈 줄(\n\n) 필수, AI 관점에서
-   - ⚠️ **절대 고정 패턴 사용 금지!** "처음에는 ~몰랐어요", "최근 들어 ~접하게 되어" 같은 문구 반복 금지. 매번 완전히 다른 시작 문구 사용 필수!
-2. **본론**: AI 관점에서 {keyword}에 대해 다루되, 소제목은 내용에 맞게 다양하게 작성 (4개 소제목 참고용):
-   - ## {keyword}란 무엇인가? (AI 관점에서)
-   - ## {keyword}의 특징과 원리 (AI 맥락에서, 마크다운 리스트 필수)
-   - ## {keyword} 기술과 활용 사례 (AI 분야에서, 마크다운 리스트 필수)
-   - ## 나의 경험/느낀 점 (AI 학습 관점에서)
-   각 소제목 다음에 반드시 빈 줄 추가 후 본문 시작, AI와의 연결고리 명확히
-3. **결론**: 반드시 2-3개 문단, 각 문단 사이 빈 줄 필수, AI 학습 관점에서
-4. **모든 문단 사이 반드시 빈 줄(\n\n) 필수** - 절대 뭉텅이로 작성하지 마세요!
-
-다시 작성해주세요."""
-                    
-                    try:
-                        format_messages = [
-                            {"role": "system", "content": system_prompt},
-                            {"role": "user", "content": format_prompt}
-                        ]
-                        
-                        format_response = self._call_groq(
-                            format_messages,
-                            response_format={"type": "json_object"}
-                        )
-                        
-                        format_content = json.loads(format_response)
-                        content_text = format_content.get("content", content_text)
-                        title = format_content.get("title", title)
-                        
-                        print(f"  ✅ [{self.name}] 형식 재생성 완료")
-                    except Exception as e:
-                        print(f"  ⚠️  [{self.name}] 형식 재생성 실패: {e}, 원본 사용")
+                    print(f"  ✅ 한글 제거 완료 (제목: {title_korean_count}개, 본문: {content_korean_count}개)")
             
-            # 한글 검증 및 한자/외국어 강제 제거 (한글 모드일 때만)
+            # 한글 검증 (한글 모드일 때 - 번역 후 간단한 검증만)
             if language == 'korean':
-                from utils import remove_hanja_from_text
+                from src.utils.helpers import remove_hanja_from_text
+                import re
                 
-                # 항상 한자/외국어 제거 후처리 강제 적용
+                # 1. 한자/외국어 제거 (필수)
                 title_cleaned = remove_hanja_from_text(title)
                 content_cleaned = remove_hanja_from_text(content_text)
                 
-                # 제거 전후 비교
                 if title != title_cleaned or content_text != content_cleaned:
                     print(f"  🔧 [{self.name}] 한자/외국어 자동 제거 중...")
                     title = title_cleaned
                     content_text = content_cleaned
                 
-                # 제거 후 검증
-                is_valid, error_msg = validate_korean_content(title, content_text)
+                # 2. 간단한 한글 비율 확인 (경고만, 재생성 없음)
+                korean_chars = len(re.findall(r'[가-힣]', title + content_text))
+                total_chars = len(re.sub(r'[^\w\s가-힣]', '', title + content_text))
+                korean_ratio = korean_chars / total_chars if total_chars > 0 else 0
+                title_has_korean = bool(re.search(r'[가-힣]', title))
                 
+                if korean_ratio < 0.7 or not title_has_korean:
+                    print(f"  ⚠️  [{self.name}] 한글 비율 낮음: {korean_ratio*100:.1f}%, 제목 한글 포함: {title_has_korean} (경고만, 계속 진행)")
+                
+                # 3. 기본 검증 (경고만, 재생성 없음)
+                is_valid, error_msg = validate_korean_content(title, content_text)
                 if not is_valid:
-                    print(f"  ⚠️  [{self.name}] 한글 검증 실패: {error_msg}")
-                    print(f"  🔄 [{self.name}] 한글로 재생성 시도... (최대 3회)")
-                    
-                    # 최대 3회 재생성 시도
-                    max_retries = 3
-                    for retry_count in range(max_retries):
-                        retry_messages = [
-                            {
-                                "role": "system",
-                                "content": """당신은 30대 초반 평범한 남성 블로그 작가입니다.
-
-⚠️ **언어 작성 규칙 (엄격히 준수 필수)**:
-- 한글 위주로 작성합니다.
-- 한자는 절대 사용하지 않습니다. (예: 非常 ❌ → 매우 ✅)
-- 베트남어, 중국어 등 외국어 특수 문자를 사용하지 않습니다. (예: khá ❌ → 꽤 ✅)
-- 기술 용어나 축약어 설명이 필요할 때만 영어를 사용하며, 괄호 안에 한글 설명을 함께 제공합니다 (예: "AI(인공지능)", "API").
-
-자연스럽고 친근한 말투를 사용하며, 과하지 않고 차분한 톤으로 작성합니다."""
-                            },
-                            {
-                                "role": "user",
-                                "content": f"""{prompt}
-
-🚨 **중요**: 이전 응답에 다음 문제가 있었습니다:
-{error_msg}
-
-다음 규칙을 엄격히 준수하여 다시 작성해주세요:
-1. 한글 위주로 작성 (한자 절대 사용 금지: 非常 ❌ → 매우 ✅)
-2. 베트남어, 중국어 등 외국어 특수 문자 사용 금지 (khá ❌ → 꽤 ✅)
-3. 필요시에만 영어 사용하며 한글 설명을 함께 제공 (예: "AI(인공지능)")
-4. 오직 한글과 필요한 경우에만 영어를 사용하세요.
-
-재시도 횟수: {retry_count + 1}/{max_retries}"""
-                            }
-                        ]
-                        
-                        try:
-                            retry_response = self._call_groq(
-                                retry_messages,
-                                response_format={"type": "json_object"}
-                            )
-                            
-                            retry_content = json.loads(retry_response)
-                            title = retry_content.get("title", title)
-                            content_text = retry_content.get("content", content_text)
-                            summary = retry_content.get("summary", summary)
-                            # keywords와 category도 업데이트 (없으면 기존 값 유지)
-                            retry_keywords = retry_content.get("keywords", [])
-                            retry_category = retry_content.get("category", "")
-                            if retry_keywords:
-                                keywords = retry_keywords
-                            if retry_category:
-                                category = retry_category
-                            
-                            # 재생성된 콘텐츠에도 한자/외국어 제거 강제 적용
-                            title = remove_hanja_from_text(title)
-                            content_text = remove_hanja_from_text(content_text)
-                            
-                            # 재검증
-                            is_valid_retry, retry_error_msg = validate_korean_content(title, content_text)
-                            if is_valid_retry:
-                                print(f"  ✅ [{self.name}] 한글 재생성 성공 (재시도 {retry_count + 1}회)")
-                                break
-                            else:
-                                if retry_count < max_retries - 1:
-                                    print(f"  ⚠️  [{self.name}] 재생성 실패: {retry_error_msg}, 다시 시도...")
-                                    error_msg = retry_error_msg
-                                else:
-                                    print(f"  ⚠️  [{self.name}] 재생성 최종 실패 (3회 시도): {retry_error_msg}")
-                                    print(f"  ⚠️  한자/외국어 제거 후처리 적용했으나 검증 실패, 원본 콘텐츠 사용")
-                        except Exception as e:
-                            if retry_count < max_retries - 1:
-                                print(f"  ⚠️  [{self.name}] 재생성 오류: {e}, 다시 시도...")
-                            else:
-                                print(f"  ⚠️  [{self.name}] 재생성 최종 실패: {e}, 원본 사용")
+                    print(f"  ⚠️  [{self.name}] 한글 검증 경고: {error_msg} (경고만, 계속 진행)")
+                else:
+                    print(f"  ✅ [{self.name}] 한글 검증 통과")
             
             # 검색 결과 가져오기 (출처용)
             validated_results = input_data.get("validated_results", [])
@@ -1163,11 +1532,62 @@ MBTI는 ISFJ로, 조용하고 배려심이 많으며, 실용적이고 세심한 
             # 관련 키워드 섹션 추가 (5~10개, 필수)
             if not keywords or len(keywords) == 0:
                 # 키워드가 없으면 기본 키워드 사용
-                keywords = [keyword]
-                print(f"  ⚠️  [{self.name}] 키워드가 없어 기본 키워드 '{keyword}' 사용")
+                if language == 'english':
+                    # 영문 모드일 때: 영어 키워드 사용
+                    if 'keyword_for_content' in locals():
+                        keywords = [keyword_for_content]
+                    else:
+                        # keyword_for_content가 없으면 직접 변환
+                        import re
+                        korean_pattern = re.compile(r'[가-힣]+')
+                        if korean_pattern.search(keyword):
+                            keyword_translation_map = {
+                                "데이터": "Data",
+                                "모델": "Model",
+                                "알고리즘": "Algorithm",
+                                "머신러닝": "Machine Learning",
+                                "딥러닝": "Deep Learning",
+                                "신경망": "Neural Network",
+                                "인공지능": "Artificial Intelligence",
+                                "AI": "AI"
+                            }
+                            keywords = [keyword_translation_map.get(keyword, keyword)]
+                        else:
+                            keywords = [keyword]
+                else:
+                    keywords = [keyword]
+                print(f"  ⚠️  [{self.name}] 키워드가 없어 기본 키워드 '{keywords[0]}' 사용")
             
             # 최대 10개까지만 사용
             keywords_to_use = keywords[:10]
+            
+            # 영문 모드일 때: 키워드 리스트에서 한글 키워드를 영어로 변환
+            if language == 'english':
+                import re
+                korean_pattern = re.compile(r'[가-힣]+')
+                keyword_translation_map = {
+                    "데이터": "Data",
+                    "모델": "Model",
+                    "알고리즘": "Algorithm",
+                    "머신러닝": "Machine Learning",
+                    "딥러닝": "Deep Learning",
+                    "신경망": "Neural Network",
+                    "인공지능": "Artificial Intelligence",
+                    "AI": "AI"
+                }
+                keywords_cleaned = []
+                for kw in keywords_to_use:
+                    if korean_pattern.search(kw):
+                        # 한글 키워드를 영어로 변환
+                        translated = keyword_translation_map.get(kw, kw)
+                        # 한글 문자 제거
+                        cleaned = korean_pattern.sub('', translated).strip()
+                        if cleaned:
+                            keywords_cleaned.append(cleaned)
+                    else:
+                        keywords_cleaned.append(kw)
+                keywords_to_use = keywords_cleaned if keywords_cleaned else keywords_to_use
+            
             if language == 'english':
                 keywords_section = "\n\n## Related Keywords\n\n"
                 keywords_section += ", ".join([f"`{kw}`" for kw in keywords_to_use])
@@ -1183,17 +1603,45 @@ MBTI는 ISFJ로, 조용하고 배려심이 많으며, 실용적이고 세심한 
             else:
                 disclaimer = "\n\n---\n\n<span style='color: #666; font-size: 0.9em;'>⚠️ 본 글은 AI를 활용하여 작성되었습니다. 일부 정보는 정확하지 않을 수 있으니 참고용으로만 활용해 주세요.</span>"
             
-            # 출처/카테고리/키워드/면책 추가 전에 한자/외국어 제거 (한글 모드일 때만)
+            # 출처/카테고리/키워드/면책 추가 전에 언어별 후처리
             if language == 'korean':
-                from utils import remove_hanja_from_text
+                # 한글 모드: 한자/외국어 제거
+                from src.utils.helpers import remove_hanja_from_text
                 content_text_before = content_text
                 content_text = remove_hanja_from_text(content_text)
                 if content_text_before != content_text:
                     print(f"  🔧 [{self.name}] 최종 한자/외국어 제거 완료")
+            elif language == 'english':
+                # 영문 모드: 한글 완전 제거 (최종 정리)
+                from src.utils.helpers import remove_korean_from_english_text
+                title_before = title
+                content_text_before = content_text
+                title = remove_korean_from_english_text(title)
+                content_text = remove_korean_from_english_text(content_text)
+                if title_before != title or content_text_before != content_text:
+                    title_korean_removed = len(re.findall(r'[가-힣]', title_before)) if title_before else 0
+                    content_korean_removed = len(re.findall(r'[가-힣]', content_text_before)) if content_text_before else 0
+                    print(f"  🔧 [{self.name}] 최종 한글 제거 완료 (제목: {title_korean_removed}개, 본문: {content_korean_removed}개)")
             
             # 출처/카테고리/키워드/면책 추가 (반드시 추가)
             # 영어 글은 오직 영어만 사용
             content_text = content_text + sources_section + category_section + keywords_section + disclaimer
+            
+            # 최종 반환 전 한번 더 한글 체크 및 제거 (영문 모드)
+            if language == 'english':
+                from src.utils.helpers import remove_korean_from_english_text
+                import re
+                korean_pattern = re.compile(r'[가-힣]')
+                final_title_korean = len(korean_pattern.findall(title))
+                final_content_korean = len(korean_pattern.findall(content_text))
+                if final_title_korean > 0 or final_content_korean > 0:
+                    print(f"  ⚠️  최종 확인: 제목에 한글 {final_title_korean}개, 본문에 한글 {final_content_korean}개 발견 - 재제거 시도")
+                    title = remove_korean_from_english_text(title)
+                    content_text = remove_korean_from_english_text(content_text)
+                    # 제거 후 다시 확인
+                    final_title_korean_after = len(korean_pattern.findall(title))
+                    final_content_korean_after = len(korean_pattern.findall(content_text))
+                    print(f"  ✅ 최종 한글 제거 완료 (제목: {final_title_korean}→{final_title_korean_after}개, 본문: {final_content_korean}→{final_content_korean_after}개)")
             
             # 키워드/카테고리 추가 확인
             if category_section:

@@ -4,7 +4,7 @@
 
 from typing import Dict, Any, List
 from agents.base import BaseAgent
-from search import search_keywords
+from src.services.search import search_keywords
 
 
 class SearchAgent(BaseAgent):

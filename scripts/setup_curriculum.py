@@ -4,25 +4,21 @@ AI 학습 커리큘럼 (365개 키워드) 데이터베이스 설정 스크립트
 오늘 AI 포스팅 완료, 내일부터 두 번째 키워드부터 1년 동안 자동 포스팅
 """
 
+#!/usr/bin/env python3
 import sys
 import os
-from database import Database
+from pathlib import Path
 
-# .env 파일 로드
-def load_env_file():
-    env_path = os.path.join(os.path.dirname(__file__), '.env')
-    if os.path.exists(env_path):
-        with open(env_path, 'r', encoding='utf-8') as f:
-            for line in f:
-                line = line.strip()
-                if line and not line.startswith('#') and '=' in line:
-                    key, value = line.split('=', 1)
-                    key = key.strip()
-                    value = value.strip().strip('"').strip("'")
-                    if key and value:
-                        os.environ[key] = value
+# 프로젝트 루트를 Python 경로에 추가
+project_root = Path(__file__).parent.parent
+sys.path.insert(0, str(project_root))
 
+# 환경 변수 로드
+from src.core.config import load_env_file
 load_env_file()
+
+# 모듈 import
+from src.core.database import Database
 
 # 커리큘럼 데이터
 CURRICULUM = {

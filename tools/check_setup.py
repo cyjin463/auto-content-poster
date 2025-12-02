@@ -5,6 +5,7 @@
 
 import os
 import sys
+from pathlib import Path
 
 def check_setup():
     print("🔍 설정 확인 중...\n")
@@ -66,7 +67,11 @@ def check_setup():
     # 4. 데이터베이스
     print("4. 데이터베이스:")
     try:
-        from database import Database
+        # 프로젝트 루트를 Python 경로에 추가
+        project_root = Path(__file__).parent.parent
+        sys.path.insert(0, str(project_root))
+        
+        from src.core.database import Database
         db = Database()
         print("   ✅ 데이터베이스 초기화 성공\n")
     except Exception as e:
@@ -75,18 +80,19 @@ def check_setup():
     
     # 5. 필수 파일
     print("5. 필수 파일:")
+    project_root = Path(__file__).parent.parent
     required_files = [
-        'main.py',
-        'main_agent.py',
-        'database.py',
-        'search.py',
-        'content_generator.py',
+        'scripts/auto_poster.py',
+        'src/core/database.py',
+        'src/services/search.py',
+        'src/services/notion.py',
         'agents/agent_chain.py'
     ]
     
     all_exist = True
     for file in required_files:
-        if os.path.exists(file):
+        file_path = project_root / file
+        if file_path.exists():
             print(f"   ✅ {file}")
         else:
             print(f"   ❌ {file} (없음)")
@@ -105,7 +111,7 @@ def check_setup():
     else:
         print("✅ 모든 설정이 완료되었습니다! 테스트를 시작할 수 있습니다.\n")
         print("테스트 실행:")
-        print("  python main_agent.py '테스트 키워드' --save-to-db")
+        print("  python scripts/auto_poster.py")
         return True
 
 if __name__ == '__main__':

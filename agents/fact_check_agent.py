@@ -83,7 +83,7 @@ class FactCheckAgent(BaseAgent):
         ]
         
         try:
-            response = self._call_groq(
+            response = self._call_llm(
                 messages,
                 response_format={"type": "json_object"}
             )
@@ -152,6 +152,7 @@ class ContentRevisionAgent(BaseAgent):
         title = input_data["title"]
         issues = input_data.get("issues", [])
         search_results = input_data.get("search_results", [])
+        language = input_data.get("language", "korean")  # 언어 정보 가져오기
         
         if not issues:
             # 문제가 없으면 원본 반환
@@ -180,12 +181,18 @@ class ContentRevisionAgent(BaseAgent):
         footer_section = footer_match.group(1) if footer_match else ""
         main_content_to_revise = original_content[:footer_match.start()] if footer_match else original_content
         
-        prompt = f"""다음 블로그 포스트에 잘못된 정보가 포함되어 있습니다. 검색 결과를 참고하여 정확한 정보로 수정해주세요.
+        # 언어별 프롬프트 생성
+        if language == 'korean':
+            language_warning = "⚠️ **중요**: 이 콘텐츠는 반드시 한글로만 작성되어야 합니다. 영어나 다른 언어를 사용하지 마세요."
+            system_message = "당신은 콘텐츠 수정 전문가입니다. 잘못된 정보를 정확한 정보로 수정하고, 원본의 구조와 톤을 유지합니다. 반드시 한글로만 작성합니다."
+            prompt = f"""다음 블로그 포스트에 잘못된 정보가 포함되어 있습니다. 검색 결과를 참고하여 정확한 정보로 수정해주세요.
 
 제목: {title}
 
 원본 내용:
 {main_content_to_revise[:3000]}...
+
+{language_warning}
 
 ⚠️ **중요**: 키워드, 카테고리, 출처, 면책 섹션은 수정하지 마세요. 본문 내용만 수정해주세요.
 
@@ -201,10 +208,11 @@ class ContentRevisionAgent(BaseAgent):
 3. 수정한 부분을 명확히 표시
 4. 전체 내용의 일관성 유지
 5. 키워드, 카테고리, 출처, 면책 섹션은 수정하지 말고 본문만 수정
+6. 반드시 한글로만 작성 (영어, 중국어, 일본어 등 다른 언어 사용 절대 금지)
 
 다음 JSON 형식으로 응답해주세요:
 {{
-  "revised_content": "수정된 본문 내용 (키워드/카테고리/출처/면책 섹션 제외)",
+  "revised_content": "수정된 본문 내용 (키워드/카테고리/출처/면책 섹션 제외, 한글로만 작성)",
   "revisions": [
     {{
       "section": "수정된 섹션",
@@ -214,11 +222,51 @@ class ContentRevisionAgent(BaseAgent):
     }}
   ]
 }}"""
+        else:  # english
+            language_warning = "⚠️ **CRITICAL**: This content must be written ONLY in English. Do NOT use Korean, Chinese, Japanese, or any other languages. If the search results contain non-English terms, translate them to English."
+            system_message = "You are a content revision expert. You fix incorrect information with accurate information while maintaining the original structure and tone. You write ONLY in English."
+            prompt = f"""The following blog post contains incorrect information. Please revise it with accurate information based on the search results.
+
+Title: {title}
+
+Original content:
+{main_content_to_revise[:3000]}...
+
+{language_warning}
+
+⚠️ **IMPORTANT**: Do not modify the keywords, category, references, or disclaimer sections. Only revise the main content.
+
+Issues found:
+{issues_summary}
+
+Search results for reference:
+{search_summary}
+
+Requirements:
+1. Fix incorrect information with accurate information
+2. Refer to search results but maintain the original structure and tone
+3. Clearly indicate what was revised
+4. Maintain consistency throughout the content
+5. Do not modify keywords, category, references, or disclaimer sections, only revise the main content
+6. Write ONLY in English (absolutely no Korean, Chinese, Japanese, or other languages)
+
+Please respond in the following JSON format:
+{{
+  "revised_content": "Revised main content (excluding keywords/category/references/disclaimer sections, written ONLY in English)",
+  "revisions": [
+    {{
+      "section": "Revised section",
+      "original": "Original content",
+      "revised": "Revised content",
+      "reason": "Reason for revision"
+    }}
+  ]
+}}"""
 
         messages = [
             {
                 "role": "system",
-                "content": "당신은 콘텐츠 수정 전문가입니다. 잘못된 정보를 정확한 정보로 수정하고, 원본의 구조와 톤을 유지합니다."
+                "content": system_message
             },
             {
                 "role": "user",
@@ -227,7 +275,7 @@ class ContentRevisionAgent(BaseAgent):
         ]
         
         try:
-            response = self._call_groq(
+            response = self._call_llm(
                 messages,
                 response_format={"type": "json_object"}
             )
@@ -236,6 +284,22 @@ class ContentRevisionAgent(BaseAgent):
             
             revisions = revision_result.get("revisions", [])
             revised_main_content = revision_result.get("revised_content", main_content_to_revise)
+            
+            # 언어별 후처리: 한자/외국어 또는 한글 제거
+            import sys
+            import os
+            sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            
+            if language == 'korean':
+                from src.utils.helpers import remove_hanja_from_text
+                # 제목과 본문 모두 다시 한자/일본어 제거
+                revised_main_content = remove_hanja_from_text(revised_main_content)
+                title = remove_hanja_from_text(title)
+            elif language == 'english':
+                # 영문 모드일 때: 수정 후 한글 제거 강제 적용
+                from src.utils.helpers import remove_korean_from_english_text
+                revised_main_content = remove_korean_from_english_text(revised_main_content)
+                title = remove_korean_from_english_text(title)
             
             # 수정된 본문에 키워드/카테고리/출처/면책 섹션 다시 추가
             final_revised_content = revised_main_content

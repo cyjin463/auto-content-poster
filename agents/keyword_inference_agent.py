@@ -82,7 +82,7 @@ class KeywordInferenceAgent(BaseAgent):
         ]
         
         try:
-            response = self._call_groq(
+            response = self._call_llm(
                 messages,
                 response_format={"type": "json_object"}
             )
