@@ -356,8 +356,10 @@ Please respond in the following JSON format:
         # 결론 확인
         has_conclusion = any("## 결론" in h or "## Conclusion" in h for h in headings) or "## 결론" in content
         
-        # 문단 구분 확인 (빈 줄이 있는지)
-        has_paragraph_breaks = "\n\n" in content
+        # 문단 구분 확인 (빈 줄이 충분히 있는지)
+        double_newlines = content.count("\n\n")
+        # 최소 10개 이상의 빈 줄(문단 구분)이 있어야 함 (서론 2-3개 문단, 본론 3-4개 섹션, 결론 2-3개 문단)
+        has_sufficient_breaks = double_newlines >= 8
         
         errors = []
         
@@ -370,18 +372,34 @@ Please respond in the following JSON format:
         if not has_conclusion:
             errors.append("결론 섹션이 없습니다.")
         
-        if not has_paragraph_breaks:
-            errors.append("문단 사이 빈 줄이 없습니다. 형식이 통으로 작성되었을 수 있습니다.")
+        if not has_sufficient_breaks:
+            errors.append(f"문단 사이 빈 줄이 부족합니다 (현재 {double_newlines}개, 최소 8개 필요). 형식이 통으로 작성되어 띄어쓰기 없이 연결되었을 수 있습니다.")
         
-        # 소제목 다음 빈 줄 확인
-        for heading in headings[:3]:  # 처음 3개만 확인
+        # 소제목 다음 빈 줄 확인 (모든 소제목 확인)
+        missing_breaks_count = 0
+        for heading in headings:
             heading_match = re.search(re.escape(heading), content)
             if heading_match:
                 start_pos = heading_match.end()
                 next_chars = content[start_pos:start_pos + 3]
                 if not next_chars.startswith("\n\n") and not next_chars.startswith("\n\r\n"):
-                    errors.append(f"소제목 다음에 빈 줄이 없습니다: {heading[:30]}")
-                    break
+                    missing_breaks_count += 1
+        
+        if missing_breaks_count > 0:
+            errors.append(f"소제목 다음에 빈 줄이 없는 경우가 {missing_breaks_count}개 있습니다. 소제목과 본문 사이 반드시 빈 줄이 필요합니다.")
+        
+        # 긴 줄이 연속으로 있는지 확인 (통으로 작성되었는지)
+        lines = content.split('\n')
+        consecutive_long_lines = 0
+        for line in lines[:20]:  # 처음 20줄만 확인
+            if len(line) > 100 and line.strip() and not line.strip().startswith('#'):  # 소제목 제외
+                consecutive_long_lines += 1
+            else:
+                consecutive_long_lines = 0
+            
+            if consecutive_long_lines >= 3:  # 3줄 이상 연속으로 100자 넘으면 의심
+                errors.append("긴 줄이 연속으로 있어 띄어쓰기 없이 통으로 작성되었을 수 있습니다.")
+                break
         
         if errors:
             return False, "; ".join(errors[:3])

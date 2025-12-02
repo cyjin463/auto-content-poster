@@ -705,7 +705,7 @@ Please respond in the following JSON format:
 다음 JSON 형식으로 응답해주세요:
 {{
   "title": "번역된 한글 제목 (15자 이내, 자연스러운 한국어, AI 관점 반영)",
-  "content": "번역된 한글 본문 (⚠️ 반드시 서론-본론(3-4개 소제목)-결론 구조 유지, 각 문단 사이 빈 줄 필수, 마크다운 형식 유지, 형식 없이 통으로 작성하면 절대 안 됩니다!)",
+  "content": "번역된 한글 본문 (🚨 반드시 서론-본론(3-4개 소제목)-결론 구조 유지, 각 문단 사이 반드시 빈 줄 필수, 소제목(##) 다음 반드시 빈 줄 필수, 마크다운 형식 유지, 띄어쓰기 없이 통으로 작성하면 절대 안 됩니다! 문단이 구분되지 않으면 안 됩니다!)",
   "summary": "번역된 한글 요약 (200자 이내)",
   "keywords": {json.dumps([kw for kw in english_keywords], ensure_ascii=False)},
   "category": "IT/컴퓨터"
@@ -713,12 +713,36 @@ Please respond in the following JSON format:
                 
                 translation_system_prompt = """당신은 전문 번역가입니다. 영문 블로그 포스트를 자연스러운 한국어로 번역합니다. 
 
-⚠️ 매우 중요:
-- 마크다운 형식과 구조를 정확히 유지해야 합니다
-- 절대 형식 없이 통으로 작성하면 안 됩니다
-- 반드시 서론-본론(3-4개 소제목)-결론 구조를 유지해야 합니다
-- 모든 문단 사이, 소제목과 본문 사이 빈 줄을 유지해야 합니다
-- AI 관점을 반영하여 번역합니다"""
+🚨🚨🚨 **절대적 명령: 형식 반드시 유지!** 🚨🚨🚨
+
+⚠️ 매우 중요 (절대 위반 불가):
+1. **마크다운 형식과 구조를 정확히 유지해야 합니다**
+   - 소제목은 반드시 ## 형식으로 작성
+   - 리스트는 반드시 - 또는 1. 2. 3. 형식으로 작성
+   - 볼드체는 **텍스트** 형식으로 작성
+
+2. **절대 형식 없이 통으로 작성하면 안 됩니다**
+   - 띄어쓰기 없이 연결해서 작성하면 절대 안 됩니다
+   - 모든 문단은 반드시 구분되어야 합니다
+   - 문단과 문단 사이 반드시 빈 줄(줄바꿈) 필요
+
+3. **반드시 서론-본론(3-4개 소제목)-결론 구조를 유지해야 합니다**
+   - 서론: 2-3개 문단, 각 문단 사이 빈 줄
+   - 본론: 3-4개 소제목(##), 각 소제목 다음 빈 줄, 각 문단 사이 빈 줄
+   - 결론: 2-3개 문단, 각 문단 사이 빈 줄
+
+4. **모든 문단 사이, 소제목과 본문 사이 반드시 빈 줄을 유지해야 합니다**
+   - 소제목(##) 다음: 반드시 빈 줄 1개
+   - 문단 끝 다음: 반드시 빈 줄 1개
+   - 빈 줄이 없으면 형식이 깨진 것으로 간주합니다
+
+5. **AI 관점을 반영하여 번역합니다**
+
+⚠️ **절대 금지 사항**:
+- 띄어쓰기 없이 모든 내용을 한 줄로 작성
+- 문단 구분 없이 통으로 작성
+- 소제목 다음 빈 줄 없이 바로 본문 작성
+- 형식 없이 텍스트만 나열"""
                 
                 translation_messages = [
                     {"role": "system", "content": translation_system_prompt},
@@ -736,6 +760,69 @@ Please respond in the following JSON format:
                 summary = translated_content.get("summary", english_summary)
                 keywords = translated_content.get("keywords", english_keywords)
                 category = translated_content.get("category", english_category)
+                
+                # 번역 직후 형식 검증 (통으로 작성되지 않았는지 확인)
+                from agents.validation_agent import ContentValidationAgent
+                format_validator = ContentValidationAgent()
+                format_valid, format_error = format_validator._validate_korean_format(content_text)
+                
+                if not format_valid:
+                    print(f"  ⚠️  [{self.name}] 번역 후 형식 검증 실패: {format_error}")
+                    print(f"  🔄 형식 문제가 있어 재번역을 시도합니다...")
+                    
+                    # 재번역 프롬프트 (형식 문제 명시)
+                    retry_translation_prompt = f"""이전 번역에서 형식 문제가 발생했습니다. 다시 번역할 때 반드시 다음을 준수해주세요:
+
+❌ 이전 번역의 문제점:
+{format_error}
+
+🚨 **절대적 명령 (반드시 지켜야 함)**:
+1. **문단 구분**: 모든 문단 사이 반드시 빈 줄(줄바꿈) 필요
+2. **소제목 다음**: 모든 소제목(##) 다음 반드시 빈 줄 1개 필요
+3. **구조 유지**: 서론(2-3문단) - 본론(3-4개 소제목) - 결론(2-3문단)
+4. **절대 금지**: 띄어쓰기 없이 통으로 작성하면 안 됩니다!
+
+영문 제목:
+{english_title}
+
+영문 본문:
+{english_content_text}
+
+⚠️ 다시 번역해주세요. 반드시 형식을 유지하고, 모든 문단 사이, 소제목 다음 빈 줄을 포함해주세요!
+
+다음 JSON 형식으로 응답해주세요:
+{{
+  "title": "번역된 한글 제목 (15자 이내)",
+  "content": "번역된 한글 본문 (⚠️ 반드시 문단 사이 빈 줄, 소제목 다음 빈 줄 포함!)",
+  "summary": "번역된 한글 요약 (200자 이내)",
+  "keywords": {json.dumps([kw for kw in english_keywords], ensure_ascii=False)},
+  "category": "IT/컴퓨터"
+}}"""
+                    
+                    retry_messages = [
+                        {"role": "system", "content": translation_system_prompt},
+                        {"role": "user", "content": retry_translation_prompt}
+                    ]
+                    
+                    retry_response = self._call_llm(
+                        retry_messages,
+                        response_format={"type": "json_object"}
+                    )
+                    
+                    retry_translated = json.loads(retry_response)
+                    title = retry_translated.get("title", title)
+                    content_text = retry_translated.get("content", content_text)
+                    summary = retry_translated.get("summary", summary)
+                    keywords = retry_translated.get("keywords", keywords)
+                    category = retry_translated.get("category", category)
+                    
+                    # 재번역 후 다시 형식 검증
+                    format_valid, format_error = format_validator._validate_korean_format(content_text)
+                    if not format_valid:
+                        print(f"  ⚠️  [{self.name}] 재번역 후에도 형식 검증 실패: {format_error}")
+                        print(f"  ⚠️  형식 문제가 있지만 계속 진행합니다. 검증 단계에서 수정될 수 있습니다.")
+                    else:
+                        print(f"  ✅ [{self.name}] 재번역 후 형식 검증 통과!")
                 
                 print(f"  ✅ [{self.name}] 한글 번역 완료: {title[:50]}")
                 
