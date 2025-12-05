@@ -36,25 +36,33 @@ def check_recent_posts():
     
     print("🔍 자동 배포 확인 시작 (9시 30분)")
     print("=" * 60)
+    print(f"현재 시간: {now_kst.strftime('%Y-%m-%d %H:%M:%S KST')}")
+    print(f"확인 기준 시간: {today_9_10am_kst.strftime('%Y-%m-%d %H:%M:%S KST')} 이후 포스팅")
+    print()
     
     # 오늘 9시 10분 이후 포스팅 조회
     conn = db._get_connection()
     cursor = conn.cursor()
     
+    # SQLite에서 datetime 비교 시 KST 시간 문자열 사용
+    # created_at은 ISO 8601 형식 (예: 2025-12-03T09:10:00+09:00) 또는 일반 형식 (예: 2025-12-03 09:10:00)
+    today_9_10am_kst_str = today_9_10am_kst.strftime('%Y-%m-%d %H:%M:%S')
+    
     query = """
         SELECT p.*, k.keyword, k.id as keyword_id
         FROM posts p
         JOIN keywords k ON p.keyword_id = k.id
-        WHERE p.created_at >= datetime(?, '-9 hours')
+        WHERE datetime(p.created_at) >= datetime(?)
+           OR p.created_at >= ?
         ORDER BY p.created_at DESC
         LIMIT 10
     """
     
-    # KST 기준으로 오늘 9시 10분 이후 포스팅 확인
-    today_9_10am_utc = (today_9_10am_kst - timedelta(hours=9)).strftime('%Y-%m-%d %H:%M:%S')
-    cursor.execute(query, (today_9_10am_utc,))
+    cursor.execute(query, (today_9_10am_kst_str, today_9_10am_kst_str))
     
-    posts = cursor.fetchall()
+    # 결과를 딕셔너리로 변환
+    columns = [desc[0] for desc in cursor.description]
+    posts = [dict(zip(columns, row)) for row in cursor.fetchall()]
     conn.close()
     
     if not posts:
@@ -63,8 +71,8 @@ def check_recent_posts():
         
         # 자동 포스팅 재시도
         print("\n🔄 자동 포스팅 재시도 중...")
-        from auto_poster import process_single_keyword_dual_language
         try:
+            from scripts.auto_poster import process_single_keyword_dual_language
             process_single_keyword_dual_language()
             print("\n✅ 재배포 완료!")
         except Exception as e:
@@ -79,22 +87,30 @@ def check_recent_posts():
     issues_found = False
     posts_to_fix = []
     
-    for post in posts:
-        post_dict = dict(post)
+    for post_dict in posts:
         title = post_dict.get('title', '제목 없음')
         status = post_dict.get('status', 'unknown')
         language = post_dict.get('language', 'unknown')
         page_id = post_dict.get('notion_page_id')
         created_at = post_dict.get('created_at', '')
+        error_message = post_dict.get('error_message', '')
         
         print(f"  [{language.upper()}] {title[:50]}")
-        print(f"      상태: {status}, Notion ID: {page_id or '없음'}")
+        print(f"      상태: {status}, Notion ID: {page_id or '없음'}, 생성 시간: {created_at}")
         
         # 문제가 있는 포스팅 체크
-        if status != 'published' or not page_id:
+        # status가 'published'가 아니거나, page_id가 없거나, error_message가 있으면 문제
+        if status != 'published' or not page_id or error_message:
             issues_found = True
             posts_to_fix.append(post_dict)
-            print(f"      ⚠️  문제 발견: 상태={status}, Notion ID={'없음' if not page_id else '있음'}")
+            issue_details = []
+            if status != 'published':
+                issue_details.append(f"상태={status}")
+            if not page_id:
+                issue_details.append("Notion ID 없음")
+            if error_message:
+                issue_details.append(f"오류={error_message[:50]}")
+            print(f"      ⚠️  문제 발견: {', '.join(issue_details)}")
     
     print()
     
@@ -119,7 +135,7 @@ def check_recent_posts():
         try:
             from agents.agent_chain import AgentChain
             from src.services.notion import create_notion_page
-            from auto_poster import ensure_sources_and_disclaimer
+            from scripts.auto_poster import ensure_sources_and_disclaimer
             
             chain = AgentChain()
             notion_page_id = os.getenv("NOTION_PARENT_PAGE_ID")

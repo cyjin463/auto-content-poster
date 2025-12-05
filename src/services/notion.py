@@ -62,13 +62,19 @@ def markdown_to_notion_blocks(markdown_text: str) -> List[Dict]:
         
         # 제목 (# 제목)
         elif line.startswith('# '):
+            heading_text = line[2:].strip()
+            
+            # Notion API 제한: heading_1은 최대 2000자
+            if len(heading_text) > 2000:
+                heading_text = heading_text[:1997] + "..."
+            
             blocks.append({
                 "object": "block",
                 "type": "heading_1",
                 "heading_1": {
                     "rich_text": [{
                         "type": "text",
-                        "text": {"content": line[2:]}
+                        "text": {"content": heading_text}
                     }]
                 }
             })

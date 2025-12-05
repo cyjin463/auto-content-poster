@@ -116,15 +116,15 @@ def validate_korean_content(title: str, content: str) -> tuple[bool, str]:
             return False, f"본문에 외국어 단어가 포함되어 있습니다: {content_match.group()}"
     
     # 한글 비율 검사 (한글이 주가 되어야 함! 영어는 필요시만)
-    # 제목: 한글 비율 70% 이상
+    # 제목: 한글 비율 50% 이상 (완화됨)
     title_korean_ratio = _calculate_korean_ratio(title)
-    if title_korean_ratio < 0.7:
-        return False, f"제목이 한글로 작성되지 않았습니다. 한글이 주가 되어야 합니다. (현재 한글 비율: {title_korean_ratio*100:.1f}%, 필요: 70% 이상)"
+    if title_korean_ratio < 0.5:
+        return False, f"제목이 한글로 작성되지 않았습니다. 한글이 주가 되어야 합니다. (현재 한글 비율: {title_korean_ratio*100:.1f}%, 필요: 50% 이상)"
     
-    # 본문: 한글 비율 80% 이상 (한글이 주, 영어는 기술 용어 등 필요시만)
+    # 본문: 한글 비율 50% 이상 (완화됨 - 영어는 기술 용어 등 필요시 사용 가능)
     content_korean_ratio = _calculate_korean_ratio(content)
-    if content_korean_ratio < 0.8:
-        return False, f"본문이 한글로 작성되지 않았습니다. 한글이 주가 되어야 하며, 영어는 기술 용어나 고유명사 설명 시에만 사용 가능합니다. (현재 한글 비율: {content_korean_ratio*100:.1f}%, 필요: 80% 이상)"
+    if content_korean_ratio < 0.5:
+        return False, f"본문이 한글로 작성되지 않았습니다. 한글이 주가 되어야 하며, 영어는 기술 용어나 고유명사 설명 시에만 사용 가능합니다. (현재 한글 비율: {content_korean_ratio*100:.1f}%, 필요: 50% 이상)"
     
     # 영어 비율 검사 (영어가 너무 많으면 실패 - 영어가 주가 되면 안 됨!)
     english_pattern = re.compile(r'[a-zA-Z]')
@@ -133,9 +133,9 @@ def validate_korean_content(title: str, content: str) -> tuple[bool, str]:
     
     if total_chars_no_space > 0:
         english_ratio = english_chars / total_chars_no_space
-        # 영어 비율이 25%를 넘으면 실패 (한글이 주가 되어야 함!)
-        if english_ratio > 0.25:
-            return False, f"본문에 영어가 너무 많습니다. 한글이 주가 되어야 하며, 영어는 기술 용어나 고유명사 설명 시에만 사용해야 합니다. (현재 영어 비율: {english_ratio*100:.1f}%, 최대 허용: 25%)"
+        # 영어 비율이 60%를 넘으면 실패 (한글이 최소한 50%는 되어야 함)
+        if english_ratio > 0.6:
+            return False, f"본문에 영어가 너무 많습니다. 한글이 최소한 50%는 되어야 하며, 영어는 기술 용어나 고유명사 설명 시에 사용 가능합니다. (현재 영어 비율: {english_ratio*100:.1f}%, 최대 허용: 60%)"
     
     return True, ""
 

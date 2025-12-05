@@ -511,9 +511,9 @@ class Database:
         cursor = conn.cursor()
         
         cursor.execute("""
-            INSERT INTO posts (id, keyword_id, title, content, search_results, status)
-            VALUES (?, ?, ?, ?, ?, ?)
-        """, (post_id, keyword_id, title, content, json.dumps(search_results), status))
+            INSERT INTO posts (id, keyword_id, title, content, search_results, status, language)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (post_id, keyword_id, title, content, json.dumps(search_results), status, language))
         
         conn.commit()
         conn.close()

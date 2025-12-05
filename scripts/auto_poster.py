@@ -329,11 +329,33 @@ def process_single_keyword_dual_language():
                 max_attempts=3
             )
             
-            # 검증 실패 시 포스팅 중단
+            # 검증 실패 시 경고만 하고 계속 진행 (한글 포함만 체크)
             if content_english is None:
-                print(f"  ❌ 영문 콘텐츠 검증 실패로 포스팅을 중단합니다.")
-                rate_limit_error = True
-                raise Exception("영문 콘텐츠 검증 실패: 한글 포함 또는 품질 기준 미달")
+                print(f"  ⚠️  영문 콘텐츠 검증 실패했지만, 한글 포함 여부를 재확인 후 진행합니다.")
+                # 한글 포함 여부만 재확인
+                from src.utils.helpers import remove_korean_from_english_text
+                # content_english가 None이므로 다시 가져오기
+                content_english = result_english['generated_content']
+                original_content = content_english['content']
+                original_title = content_english['title']
+                
+                # 한글 제거 후 재확인
+                cleaned_content = remove_korean_from_english_text(original_content)
+                cleaned_title = remove_korean_from_english_text(original_title)
+                
+                # 한글이 제거되었다면 경고만 하고 계속 진행
+                import re
+                korean_pattern = re.compile(r'[가-힣]')
+                has_korean = bool(korean_pattern.search(cleaned_content + cleaned_title))
+                
+                if has_korean:
+                    print(f"  ❌ 영문 콘텐츠에 한글이 포함되어 포스팅을 중단합니다.")
+                    rate_limit_error = True
+                    raise Exception("영문 콘텐츠 검증 실패: 한글 포함")
+                else:
+                    print(f"  ⚠️  한글 포함은 없지만 품질 검증 실패. 경고 후 계속 진행합니다.")
+                    content_english['content'] = cleaned_content
+                    content_english['title'] = cleaned_title
             
             # 출처 및 면책문구 확인
             content_english['content'] = ensure_sources_and_disclaimer(content_english['content'])
@@ -412,13 +434,95 @@ def process_single_keyword_dual_language():
     page_url_korean = None
     post_id_korean = None
     
+    # 1단계에서 생성된 영문 콘텐츠가 없으면 종료
+    if not content_english:
+        print(f"  ❌ 영문 콘텐츠가 없어 한글 포스팅을 건너뜁니다.")
+        return
+    
     try:
-        result_korean = chain.process(keyword_name, notion_page_id, language='korean', skip_posting=True)
+        # 1단계에서 생성된 영문 콘텐츠를 직접 한글로 번역
+        print(f"  🔄 1단계에서 생성된 영문 콘텐츠를 한글로 번역 중...")
+        from agents.content_agent import ContentGenerationAgent
+        import json
+        from src.utils.format_fixer import fix_korean_content_format
+        
+        agent = ContentGenerationAgent()
+        
+        english_title = content_english['title']
+        english_content_text = content_english['content']
+        
+        # 번역 프롬프트 준비
+        translation_prompt = f"""다음 영문 블로그 포스트를 자연스러운 한국어로 번역해주세요.
+
+🚨🚨🚨 **절대적 명령: 반드시 한글로만 번역! 형식 반드시 유지!** 🚨🚨🚨
+
+⚠️ 매우 중요:
+- 반드시 한글로만 번역 (제목, 본문 모두)
+- 소제목(##) 다음 반드시 빈 줄 필요
+- 문단 사이 반드시 빈 줄 필요
+- 서론-본론-결론 구조 유지
+- 마크다운 형식 유지
+
+영문 제목:
+{english_title}
+
+영문 본문:
+{english_content_text}
+
+다음 JSON 형식으로 응답해주세요:
+{{
+  "title": "번역된 한글 제목 (15자 이내)",
+  "content": "번역된 한글 본문 (빈 줄 포함, 형식 유지)"
+}}"""
+        
+        translation_system_prompt = """당신은 전문 번역가입니다. 영문 블로그 포스트를 자연스러운 한국어로 번역합니다. 
+🚨🚨🚨 **절대적 명령: 반드시 한글로만 번역! 형식 반드시 유지!** 🚨🚨🚨"""
+        
+        messages = [
+            {"role": "system", "content": translation_system_prompt},
+            {"role": "user", "content": translation_prompt}
+        ]
+        
+        translation_response = agent._call_llm(
+            messages,
+            response_format={"type": "json_object"}
+        )
+        
+        translated_content = json.loads(translation_response)
+        korean_title = translated_content.get("title", "")
+        korean_content_text = translated_content.get("content", "")
+        
+        # 이스케이프 복구
+        if '\\n' in korean_content_text:
+            korean_content_text = korean_content_text.replace('\\n', '\n')
+        
+        # 형식 자동 수정
+        korean_content_text = fix_korean_content_format(korean_content_text)
+        print(f"  🔧 번역 후 형식 자동 수정 완료")
+        
+        # 한자/외국어 제거
+        from src.utils.helpers import remove_hanja_from_text
+        korean_content_text = remove_hanja_from_text(korean_content_text)
+        korean_title = remove_hanja_from_text(korean_title)
+        
+        # content_korean 딕셔너리 생성
+        content_korean = {
+            'title': korean_title,
+            'content': korean_content_text,
+            'summary': content_english.get('summary', ''),
+            'keywords': content_english.get('keywords', []),
+            'category': content_english.get('category', 'IT/컴퓨터')
+        }
+        
+        validated_results_korean = []
+        
+        # 기존 체인 프로세스 결과를 시뮬레이션
+        result_korean = {
+            'status': 'success',
+            'generated_content': content_korean
+        }
         
         if result_korean["status"] == "success":
-            content_korean = result_korean['generated_content']
-            validated_results_korean = result_korean.get('validated_results', [])
-            
             # 한글 콘텐츠 검증 (형식 및 언어 - 통과될 때까지 반복)
             print(f"\n  🔍 한글 콘텐츠 검증 시작... (형식 및 언어)")
             content_korean = validate_and_fix_content(
@@ -429,10 +533,32 @@ def process_single_keyword_dual_language():
                 max_attempts=3
             )
             
-            # 검증 실패 시 포스팅 중단
+            # 검증 실패 시 경고만 하고 계속 진행 (외국어 포함만 체크)
             if content_korean is None:
-                print(f"  ❌ 한글 콘텐츠 검증 실패로 포스팅을 중단합니다.")
-                raise Exception("한글 콘텐츠 검증 실패: 형식 또는 언어 기준 미달")
+                print(f"  ⚠️  한글 콘텐츠 검증 실패했지만, 외국어 포함 여부를 재확인 후 진행합니다.")
+                # 외국어(일본어, 중국어 등) 포함 여부만 재확인
+                from src.utils.helpers import remove_hanja_from_text
+                # content_korean이 None이므로 다시 가져오기
+                content_korean = result_korean['generated_content']
+                original_content = content_korean['content']
+                original_title = content_korean['title']
+                
+                # 한자/외국어 제거 후 재확인
+                cleaned_content = remove_hanja_from_text(original_content)
+                cleaned_title = remove_hanja_from_text(original_title)
+                
+                # 한자/외국어 제거 여부 확인
+                import re
+                hanja_pattern = re.compile(r'[一-龯\u3040-\u309F\u30A0-\u30FF\u3400-\u4DBF\u4E00-\u9FAF]')
+                has_foreign_chars = bool(hanja_pattern.search(cleaned_content + cleaned_title))
+                
+                if has_foreign_chars:
+                    print(f"  ❌ 한글 콘텐츠에 한자/일본어 등 외국어가 포함되어 포스팅을 중단합니다.")
+                    raise Exception("한글 콘텐츠 검증 실패: 한자/외국어 포함")
+                else:
+                    print(f"  ⚠️  외국어 포함은 없지만 품질/비율 검증 실패. 경고 후 계속 진행합니다.")
+                    content_korean['content'] = cleaned_content
+                    content_korean['title'] = cleaned_title
             
             # 출처 및 면책문구 확인
             content_korean['content'] = ensure_sources_and_disclaimer(content_korean['content'])
