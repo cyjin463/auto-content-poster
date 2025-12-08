@@ -133,32 +133,6 @@ def markdown_to_notion_blocks(markdown_text: str) -> List[Dict]:
             if not rich_text:
                 rich_text = [{"type": "text", "text": {"content": line}}]
             
-            # Notion API 제한: paragraph 텍스트는 최대 2000자
-            # rich_text 배열의 총 길이 확인
-            total_length = sum(len(item.get("text", {}).get("content", "")) for item in rich_text)
-            
-            if total_length > 2000:
-                # 텍스트가 너무 길면 자름
-                current_length = 0
-                truncated_rich_text = []
-                
-                for item in rich_text:
-                    text_content = item.get("text", {}).get("content", "")
-                    remaining_space = 2000 - current_length
-                    
-                    if current_length + len(text_content) <= 2000:
-                        truncated_rich_text.append(item)
-                        current_length += len(text_content)
-                    else:
-                        # 남은 공간만큼만 추가
-                        if remaining_space > 0:
-                            truncated_item = item.copy()
-                            truncated_item["text"]["content"] = text_content[:remaining_space]
-                            truncated_rich_text.append(truncated_item)
-                        break
-                
-                rich_text = truncated_rich_text
-            
             blocks.append({
                 "object": "block",
                 "type": "paragraph",
@@ -172,60 +146,16 @@ def markdown_to_notion_blocks(markdown_text: str) -> List[Dict]:
             clean_line = re.sub(r'<[^>]+>', '', line)
             
             if clean_line:
-                # Notion API 제한: paragraph 텍스트는 최대 2000자
-                # 2000자를 초과하면 여러 paragraph 블록으로 분할
-                if len(clean_line) > 2000:
-                    # 문장 끝(마침표, 느낌표, 물음표)에서 분할 시도
-                    max_chunk_size = 1900  # 여유를 두고
-                    chunks = []
-                    current_chunk = ""
-                    
-                    # 마침표로 문장 단위로 분할 시도
-                    sentences = re.split(r'([.!?。！？])', clean_line)
-                    
-                    for i in range(0, len(sentences), 2):
-                        sentence = sentences[i]
-                        punctuation = sentences[i + 1] if i + 1 < len(sentences) else ""
-                        full_sentence = sentence + punctuation
-                        
-                        if len(current_chunk) + len(full_sentence) <= max_chunk_size:
-                            current_chunk += full_sentence
-                        else:
-                            if current_chunk:
-                                chunks.append(current_chunk)
-                            current_chunk = full_sentence
-                            # 단일 문장이 max_chunk_size를 초과하면 강제로 자름
-                            while len(current_chunk) > max_chunk_size:
-                                chunks.append(current_chunk[:max_chunk_size])
-                                current_chunk = current_chunk[max_chunk_size:]
-                    
-                    if current_chunk:
-                        chunks.append(current_chunk)
-                    
-                    # 각 청크를 별도 paragraph 블록으로 생성
-                    for chunk in chunks:
-                        if chunk.strip():
-                            blocks.append({
-                                "object": "block",
-                                "type": "paragraph",
-                                "paragraph": {
-                                    "rich_text": [{
-                                        "type": "text",
-                                        "text": {"content": chunk.strip()}
-                                    }]
-                                }
-                            })
-                else:
-                    blocks.append({
-                        "object": "block",
-                        "type": "paragraph",
-                        "paragraph": {
-                            "rich_text": [{
-                                "type": "text",
-                                "text": {"content": clean_line}
-                            }]
-                        }
-                    })
+                blocks.append({
+                    "object": "block",
+                    "type": "paragraph",
+                    "paragraph": {
+                        "rich_text": [{
+                            "type": "text",
+                            "text": {"content": clean_line}
+                        }]
+                    }
+                })
         
         i += 1
     
