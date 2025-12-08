@@ -451,7 +451,13 @@ def process_single_keyword_dual_language():
         english_title = content_english['title']
         english_content_text = content_english['content']
         
-        # 번역 프롬프트 준비 (형식 유지 강화)
+        # 영문 본문 구조 분석
+        import re
+        eng_paragraphs = len(re.findall(r'\n\n+', english_content_text))
+        eng_headings = len(re.findall(r'^##\s+', english_content_text, re.MULTILINE))
+        eng_sections = len(re.findall(r'^\*\*', english_content_text, re.MULTILINE))
+        
+        # 번역 프롬프트 준비 (형식 유지 강화 + 구조 정보 포함)
         translation_prompt = f"""다음 영문 블로그 포스트를 자연스러운 한국어로 번역해주세요.
 
 🚨🚨🚨 **절대적 명령: 반드시 한글로만 번역! 형식 반드시 유지!** 🚨🚨🚨
@@ -460,19 +466,25 @@ def process_single_keyword_dual_language():
 
 1. **언어 규칙**: 반드시 한글로만 번역 (제목, 본문 모두)
 
-2. **구조 유지 (매우 중요)**:
+2. **영문 본문 구조 분석**:
+   - 문단 구분(빈 줄): {eng_paragraphs}개
+   - 소제목(##): {eng_headings}개
+   - 섹션(**, **Introduction**, **Body** 등): {eng_sections}개
+   - ⚠️ **위 구조를 그대로 유지하면서 번역해야 합니다!**
+
+3. **구조 유지 (매우 중요)**:
    - ⚠️ 반드시 서론-본론(3-4개 소제목)-결론 구조 유지
    - 서론: 2-3개 문단, 각 문단 사이 빈 줄(\\n\\n) 필수
    - 본론: 3-4개 소제목(##), 각 소제목 다음 빈 줄(\\n\\n) 필수, 각 문단 사이 빈 줄(\\n\\n) 필수
    - 결론: 2-3개 문단, 각 문단 사이 빈 줄(\\n\\n) 필수
 
-3. **빈 줄 규칙 (절대 필수)**:
+4. **빈 줄 규칙 (절대 필수)**:
    - 모든 소제목(##) 다음: 반드시 빈 줄(\\n\\n) 1개
    - 모든 문단 끝(마침표 다음): 반드시 빈 줄(\\n\\n) 1개
    - **서론** 제목 다음: 반드시 빈 줄(\\n\\n) 1개
    - **본론** 제목 다음: 반드시 빈 줄(\\n\\n) 1개
 
-4. **절대 금지**:
+5. **절대 금지**:
    - 띄어쓰기 없이 통으로 작성하면 절대 안 됩니다!
    - 문단 구분 없이 한 덩어리로 작성하면 절대 안 됩니다!
    - 소제목 다음 빈 줄 없이 바로 본문 작성하면 절대 안 됩니다!
@@ -481,11 +493,14 @@ def process_single_keyword_dual_language():
 {english_title}
 
 영문 본문:
-{english_content_text[:4000]}
+{english_content_text}
 
-⚠️ **중요**: 영문 본문의 형식(빈 줄, 소제목 구조)을 그대로 유지하면서 번역하세요!
+⚠️ **중요**: 영문 본문의 형식(빈 줄, 소제목 구조)을 **정확히 그대로** 유지하면서 번역하세요!
+- 영문에 빈 줄이 있는 곳은 한글에도 반드시 빈 줄이 있어야 합니다
+- 영문에 소제목(##)이 있는 곳은 한글에도 반드시 소제목(##)이 있어야 합니다
+- 영문의 문단 구조를 그대로 따라야 합니다
 
-📋 **형식 예시** (전전 포스팅처럼):
+📋 **형식 예시** (반드시 따라야 할 형식):
 ```
 **서론**
 
@@ -513,7 +528,7 @@ def process_single_keyword_dual_language():
 다음 JSON 형식으로 응답해주세요:
 {{
   "title": "번역된 한글 제목 (15자 이내)",
-  "content": "번역된 한글 본문 (⚠️ 반드시 빈 줄 포함, JSON에서 \\\\n으로 표현, 소제목 다음 \\\\n\\\\n, 문단 끝 다음 \\\\n\\\\n)"
+  "content": "번역된 한글 본문 (⚠️ 반드시 빈 줄 포함, JSON에서 \\\\n\\\\n으로 표현, 소제목 다음 \\\\n\\\\n, 문단 끝 다음 \\\\n\\\\n, 영문과 동일한 구조 유지 필수)"
 }}"""
         
         translation_system_prompt = """당신은 전문 번역가입니다. 영문 블로그 포스트를 자연스러운 한국어로 번역합니다. 
@@ -533,13 +548,30 @@ def process_single_keyword_dual_language():
         korean_title = translated_content.get("title", "")
         korean_content_text = translated_content.get("content", "")
         
-        # 이스케이프 복구
+        # 이스케이프 복구 (여러 단계로 처리)
+        # 1단계: \\\\n → \\n (JSON 이스케이프 복구)
+        korean_content_text = korean_content_text.replace('\\\\n', '\n')
+        # 2단계: \\n → \n (일반 이스케이프 복구)
         if '\\n' in korean_content_text:
             korean_content_text = korean_content_text.replace('\\n', '\n')
         
+        # 번역 전후 구조 비교
+        kor_paragraphs = len(re.findall(r'\n\n+', korean_content_text))
+        kor_headings = len(re.findall(r'^##\s+', korean_content_text, re.MULTILINE))
+        
+        print(f"  📊 구조 비교: 영문(빈줄:{eng_paragraphs}, 소제목:{eng_headings}) → 한글(빈줄:{kor_paragraphs}, 소제목:{kor_headings})")
+        
+        # 형식이 많이 손실된 경우 경고
+        if kor_paragraphs < eng_paragraphs * 0.5 or kor_headings < eng_headings * 0.5:
+            print(f"  ⚠️  경고: 형식이 많이 손실되었습니다! 형식 복구를 시도합니다...")
+        
         # 형식 자동 수정
         korean_content_text = fix_korean_content_format(korean_content_text)
-        print(f"  🔧 번역 후 형식 자동 수정 완료")
+        
+        # 수정 후 다시 확인
+        kor_paragraphs_after = len(re.findall(r'\n\n+', korean_content_text))
+        kor_headings_after = len(re.findall(r'^##\s+', korean_content_text, re.MULTILINE))
+        print(f"  🔧 번역 후 형식 자동 수정 완료 (빈줄:{kor_paragraphs_after}, 소제목:{kor_headings_after})")
         
         # 한자/외국어 제거
         from src.utils.helpers import remove_hanja_from_text
